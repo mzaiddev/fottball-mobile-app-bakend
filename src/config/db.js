@@ -3,7 +3,8 @@ const env = require("./env");
 
 const globalCache = global.__projectBallerMongo || {
   connection: null,
-  promise: null
+  promise: null,
+  bootstrapPromise: null
 };
 
 global.__projectBallerMongo = globalCache;
@@ -26,7 +27,7 @@ async function connectDb() {
   globalCache.promise = mongoose
     .connect(env.mongodbUri, {
       dbName: env.mongodbDbName,
-      serverSelectionTimeoutMS: 15000,
+      serverSelectionTimeoutMS: 7000,
       socketTimeoutMS: 45000,
       maxPoolSize: 5,
       minPoolSize: 0,
@@ -49,8 +50,22 @@ async function connectDb() {
   return globalCache.promise;
 }
 
+async function bootstrapOnce() {
+  if (!globalCache.bootstrapPromise) {
+    const { bootstrapDefaults } = require("../services/bootstrap.service");
+    globalCache.bootstrapPromise = bootstrapDefaults().catch((error) => {
+      globalCache.bootstrapPromise = null;
+      throw error;
+    });
+  }
+  return globalCache.bootstrapPromise;
+}
+
 function ensureDbConnected(req, res, next) {
-  connectDb().then(() => next()).catch(next);
+  connectDb()
+    .then(() => bootstrapOnce())
+    .then(() => next())
+    .catch(next);
 }
 
 module.exports = { connectDb, ensureDbConnected };

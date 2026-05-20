@@ -1,17 +1,25 @@
-const app = require("../src/app");
-const { connectDb } = require("../src/config/db");
-const { bootstrapDefaults } = require("../src/services/bootstrap.service");
+let app;
 
-let bootPromise;
-
-async function boot() {
-  if (!bootPromise) {
-    bootPromise = connectDb().then(() => bootstrapDefaults());
+function loadApp() {
+  if (!app) {
+    app = require("../src/app");
   }
-  return bootPromise;
+  return app;
 }
 
 module.exports = async function handler(req, res) {
-  await boot();
-  return app(req, res);
+  try {
+    return loadApp()(req, res);
+  } catch (error) {
+    console.error("Vercel function boot failed", error);
+    const message =
+      process.env.NODE_ENV === "production"
+        ? "Backend failed to start. Check Vercel environment variables and function logs."
+        : error.message;
+    return res.status(500).json({
+      success: false,
+      message,
+      details: process.env.NODE_ENV === "production" ? null : error.stack
+    });
+  }
 };

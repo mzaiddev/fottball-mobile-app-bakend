@@ -2,13 +2,16 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
-const required = ["MONGODB_URI", "JWT_SECRET", "JWT_REFRESH_SECRET", "OPENAI_API_KEY"];
+const required = ["MONGODB_URI", "JWT_SECRET", "JWT_REFRESH_SECRET"];
 
 if (process.env.NODE_ENV === "production") {
   for (const key of required) {
     if (!process.env[key]) {
       throw new Error(`Missing required environment variable: ${key}`);
     }
+  }
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("OPENAI_API_KEY is not configured. AI features will use safe fallback responses.");
   }
 }
 
