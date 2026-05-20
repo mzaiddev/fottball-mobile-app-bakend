@@ -104,4 +104,4 @@ GET /health
 - Plan generation falls back to deterministic templates if OpenAI is unavailable.
 - Rehab is template-driven and locked by protocol, matching your requirement that AI does not prescribe rehab.
 - Match readiness score is recalculated from training load, recovery, match timing, and nutrition/hydration.
-- The admin dashboard frontend can now consume these APIs directly.
+- The admin dashboard frontend can now consume these APIs directly
