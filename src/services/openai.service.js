@@ -5,7 +5,7 @@ const client = env.openAiApiKey
   ? new OpenAI({
       apiKey: env.openAiApiKey,
       timeout: env.openAiTimeoutMs,
-      maxRetries: env.openAiMaxRetries
+      maxRetries: env.openAiMaxRetries,
     })
   : null;
 
@@ -51,10 +51,11 @@ function normalizeMessages({ system, messages = [], prompt }) {
     if (!message?.content) continue;
     normalized.push({
       role: message.role === "assistant" ? "assistant" : "user",
-      content: String(message.content).slice(0, 6000)
+      content: String(message.content).slice(0, 6000),
     });
   }
-  if (prompt) normalized.push({ role: "user", content: String(prompt).slice(0, 12000) });
+  if (prompt)
+    normalized.push({ role: "user", content: String(prompt).slice(0, 12000) });
   return normalized;
 }
 
@@ -66,25 +67,40 @@ async function createChatCompletion({
   maxTokens = 900,
   responseFormat,
   fallback = "",
-  purpose = "openai"
+  purpose = "openai",
 }) {
   if (!client) {
     return {
       content: fallback,
       source: "fallback",
-      errorMessage: "OPENAI_API_KEY is not configured"
+      errorMessage: "OPENAI_API_KEY is not configured",
     };
   }
 
   try {
+    console.log("OpenAI request", {
+      purpose,
+      system: Boolean(system),
+      messages: messages?.length || 0,
+      prompt: Boolean(prompt),
+    });
     const completion = await client.chat.completions.create({
       model: env.openAiModel,
       temperature,
       max_tokens: maxTokens,
       response_format: responseFormat,
-      messages: normalizeMessages({ system, messages, prompt })
+      messages: normalizeMessages({ system, messages, prompt }),
     });
 
+    console.log(
+      "OpenAI response",
+      {
+        purpose,
+        model: completion.model,
+        usage: completion.usage,
+      },
+      completion,
+    );
     const content = completion.choices?.[0]?.message?.content?.trim();
     if (!content) {
       return {
@@ -92,7 +108,7 @@ async function createChatCompletion({
         source: "fallback",
         model: completion.model || env.openAiModel,
         usage: completion.usage,
-        errorMessage: "OpenAI returned an empty response"
+        errorMessage: "OpenAI returned an empty response",
       };
     }
 
@@ -100,7 +116,7 @@ async function createChatCompletion({
       content,
       source: "openai",
       model: completion.model || env.openAiModel,
-      usage: completion.usage
+      usage: completion.usage,
     };
   } catch (error) {
     const errorMessage = compactError(error);
@@ -108,12 +124,20 @@ async function createChatCompletion({
     return {
       content: fallback,
       source: "fallback",
-      errorMessage
+      errorMessage,
     };
   }
 }
 
-async function generateText({ system, messages, prompt, fallback, temperature = 0.35, maxTokens = 700, purpose }) {
+async function generateText({
+  system,
+  messages,
+  prompt,
+  fallback,
+  temperature = 0.35,
+  maxTokens = 700,
+  purpose,
+}) {
   return createChatCompletion({
     system,
     messages,
@@ -121,11 +145,17 @@ async function generateText({ system, messages, prompt, fallback, temperature = 
     fallback,
     temperature,
     maxTokens,
-    purpose
+    purpose,
   });
 }
 
-async function generateStructuredJson({ system, prompt, fallback, temperature = 0.2, maxTokens = 1800 }) {
+async function generateStructuredJson({
+  system,
+  prompt,
+  fallback,
+  temperature = 0.2,
+  maxTokens = 1800,
+}) {
   const result = await createChatCompletion({
     system,
     prompt: `${prompt}\n\nReturn one valid JSON object only. Do not include markdown fences or commentary.`,
@@ -133,7 +163,7 @@ async function generateStructuredJson({ system, prompt, fallback, temperature = 
     temperature,
     maxTokens,
     responseFormat: { type: "json_object" },
-    purpose: "structured_json"
+    purpose: "structured_json",
   });
 
   if (result.source !== "openai") {
@@ -147,5 +177,5 @@ module.exports = {
   createChatCompletion,
   generateStructuredJson,
   generateText,
-  isOpenAiConfigured
+  isOpenAiConfigured,
 };
