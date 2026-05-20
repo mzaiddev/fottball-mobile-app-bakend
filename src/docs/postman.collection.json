@@ -1,0 +1,858 @@
+{
+  "info": {
+    "_postman_id": "7b88a045-0f93-4ec7-8617-project-baller-api",
+    "name": "Project Baller Backend API",
+    "description": "Postman collection for testing the Project Baller backend. Run Auth > Login first; the test script saves accessToken and refreshToken into collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": []
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": []
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "postId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "matchId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "workoutLogId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "recipeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "threadId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "if (json.data?.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "if (json.data?.user?._id) pm.collectionVariables.set('userId', json.data.user._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test Player\",\n  \"email\": \"player{{$timestamp}}@example.com\",\n  \"password\": \"password123\",\n  \"acceptedTerms\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "if (json.data?.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "if (json.data?.user?._id) pm.collectionVariables.set('userId', json.data.user._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"player@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Validate Referral Code",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/auth/referrals/BALLER-CODE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "referrals",
+                "BALLER-CODE"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Dashboard",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users/dashboard"
+          }
+        },
+        {
+          "name": "Update Onboarding",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"completed\": true,\n  \"currentStep\": 999,\n  \"answers\": {\n    \"position\": \"ST\",\n    \"teamTrainingDays\": [\"Tue\", \"Thu\"],\n    \"matchDays\": [\"Sun\"],\n    \"gymDays\": 3,\n    \"trainingGoal\": \"everything\"\n  },\n  \"constraints\": {\n    \"equipment\": [\"Full gym\"],\n    \"dietaryPreferences\": [\"High Protein\"]\n  }\n}"
+            },
+            "url": "{{baseUrl}}/users/onboarding"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Updated Player\",\n  \"position\": \"ST\",\n  \"goals\": [\"More minutes\", \"Better match fitness\"]\n}"
+            },
+            "url": "{{baseUrl}}/users/profile"
+          }
+        },
+        {
+          "name": "Connect Wearable",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"appleHealth\",\n  \"connected\": true\n}"
+            },
+            "url": "{{baseUrl}}/users/wearables"
+          }
+        },
+        {
+          "name": "Referral Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users/referrals"
+          }
+        },
+        {
+          "name": "Notifications",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users/notifications"
+          }
+        },
+        {
+          "name": "Mark Notification Read",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/users/notifications/{{notificationId}}/read"
+          }
+        },
+        {
+          "name": "Create Support Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Need help\",\n  \"description\": \"Testing support ticket from Postman.\"\n}"
+            },
+            "url": "{{baseUrl}}/users/support-tickets"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plans",
+      "item": [
+        {
+          "name": "Generate Plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchDays\": [\"Sunday\"],\n  \"teamTrainingDays\": [\"Tuesday\", \"Thursday\"],\n  \"gymDays\": 3,\n  \"position\": \"ST\"\n}"
+            },
+            "url": "{{baseUrl}}/plans/generate"
+          }
+        },
+        {
+          "name": "Current Plan",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/plans/current"
+          }
+        },
+        {
+          "name": "Regenerate Plan",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/plans/regenerate"
+          }
+        },
+        {
+          "name": "Create Workout Log",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?.log?._id) pm.collectionVariables.set('workoutLogId', json.data.log._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Full Body Strength\",\n  \"durationMin\": 60,\n  \"rpe\": 7,\n  \"exercises\": [\n    { \"name\": \"Back Squat\", \"setIndex\": 1, \"reps\": 6, \"completed\": true }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/plans/workouts/log"
+          }
+        },
+        {
+          "name": "Workout Logs",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/plans/workouts/logs"
+          }
+        },
+        {
+          "name": "Update Workout Log",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rpe\": 8,\n  \"soreness\": 3,\n  \"notes\": \"Updated from Postman\"\n}"
+            },
+            "url": "{{baseUrl}}/plans/workouts/logs/{{workoutLogId}}"
+          }
+        },
+        {
+          "name": "Exercise Library",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/plans/library/exercises"
+          }
+        },
+        {
+          "name": "Add Progress Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"sleep\",\n  \"metric\": \"sleep_hours\",\n  \"value\": 8,\n  \"unit\": \"hours\",\n  \"notes\": \"Good sleep\"\n}"
+            },
+            "url": "{{baseUrl}}/plans/progress"
+          }
+        },
+        {
+          "name": "Insights",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/plans/insights"
+          }
+        },
+        {
+          "name": "AI Coach Chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What should I focus on today?\"\n}"
+            },
+            "url": "{{baseUrl}}/plans/ai-chat"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Nutrition",
+      "item": [
+        {
+          "name": "Today",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/nutrition/today"
+          }
+        },
+        {
+          "name": "Add Meal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Chicken rice bowl\",\n  \"mealType\": \"lunch\",\n  \"calories\": 650,\n  \"protein\": 42,\n  \"carbs\": 70,\n  \"fats\": 18\n}"
+            },
+            "url": "{{baseUrl}}/nutrition/meals"
+          }
+        },
+        {
+          "name": "Remove Meal By Index",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/nutrition/meals/0"
+          }
+        },
+        {
+          "name": "Add Hydration",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hydrationMl\": 250\n}"
+            },
+            "url": "{{baseUrl}}/nutrition/hydration"
+          }
+        },
+        {
+          "name": "Generate Meal Plan",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/nutrition/generate-meal-plan"
+          }
+        },
+        {
+          "name": "Recipes",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/nutrition/recipes"
+          }
+        },
+        {
+          "name": "Meal Swap",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipeId\": \"{{recipeId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/nutrition/meal-swap"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Matches",
+      "item": [
+        {
+          "name": "Create Match",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?._id) pm.collectionVariables.set('matchId', json.data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"opponent\": \"City FC\",\n  \"dateTime\": \"{{$isoTimestamp}}\",\n  \"venue\": \"Home\",\n  \"location\": \"Main Stadium\",\n  \"competitionType\": \"League\"\n}"
+            },
+            "url": "{{baseUrl}}/matches"
+          }
+        },
+        {
+          "name": "List Matches",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/matches"
+          }
+        },
+        {
+          "name": "Match History",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/matches/history"
+          }
+        },
+        {
+          "name": "Match Hub",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/matches/{{matchId}}/hub"
+          }
+        },
+        {
+          "name": "Log Performance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutesPlayed\": 90,\n  \"goals\": 1,\n  \"assists\": 0,\n  \"selfRating\": 8,\n  \"notes\": \"Strong performance\"\n}"
+            },
+            "url": "{{baseUrl}}/matches/{{matchId}}/performance"
+          }
+        },
+        {
+          "name": "Auto Adjust Plan",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/matches/auto-adjust-plan"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Community",
+      "item": [
+        {
+          "name": "Upload Community Image",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "folder",
+                  "value": "community",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/community/media"
+          }
+        },
+        {
+          "name": "Create Post",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?._id) pm.collectionVariables.set('postId', json.data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Testing community post from Postman\",\n  \"mediaUrls\": []\n}"
+            },
+            "url": "{{baseUrl}}/community/posts"
+          }
+        },
+        {
+          "name": "List Posts",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/community/posts"
+          }
+        },
+        {
+          "name": "Like Post",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/community/posts/{{postId}}/like"
+          }
+        },
+        {
+          "name": "Comment On Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Nice work!\"\n}"
+            },
+            "url": "{{baseUrl}}/community/posts/{{postId}}/comment"
+          }
+        },
+        {
+          "name": "Create Thread",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?._id) pm.collectionVariables.set('threadId', json.data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"otherUserId\": \"{{userId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/community/threads"
+          }
+        },
+        {
+          "name": "List Threads",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/community/threads"
+          }
+        },
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Hello from Postman\",\n  \"mediaUrls\": []\n}"
+            },
+            "url": "{{baseUrl}}/community/threads/{{threadId}}/messages"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Integrations",
+      "item": [
+        {
+          "name": "Cloudinary Upload",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/integrations/upload"
+          }
+        },
+        {
+          "name": "Stripe Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceId\": \"price_test\",\n  \"successUrl\": \"http://localhost:3000/success\",\n  \"cancelUrl\": \"http://localhost:3000/cancel\"\n}"
+            },
+            "url": "{{baseUrl}}/integrations/checkout"
+          }
+        },
+        {
+          "name": "Referral Link",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/integrations/referral-link"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Dashboard",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/dashboard"
+          }
+        },
+        {
+          "name": "Users",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/users"
+          }
+        },
+        {
+          "name": "Plan Review Queue",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/plans/review-queue"
+          }
+        },
+        {
+          "name": "Approve Plan",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/admin/plans/{{planId}}/approve"
+          }
+        },
+        {
+          "name": "Rules",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/rules"
+          }
+        },
+        {
+          "name": "Exercises",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/exercises"
+          }
+        },
+        {
+          "name": "Recipes",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/recipes"
+          }
+        },
+        {
+          "name": "Support Tickets",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/support-tickets"
+          }
+        }
+      ]
+    }
+  ]
+}
