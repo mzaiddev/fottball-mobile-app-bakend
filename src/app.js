@@ -9,6 +9,7 @@ const swaggerUi = require("swagger-ui-express");
 const openApiSpec = require("./docs/openapi");
 const postmanCollection = require("./docs/postman.collection.json");
 const routes = require("./routes");
+const { ensureDbConnected } = require("./config/db");
 const { errorHandler, notFound } = require("./middlewares/error.middleware");
 
 const app = express();
@@ -78,7 +79,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.use("/api", routes);
+app.use("/api", ensureDbConnected, routes);
 app.use(notFound);
 app.use(errorHandler);
 

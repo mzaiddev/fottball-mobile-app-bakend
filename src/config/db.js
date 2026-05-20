@@ -1,25 +1,56 @@
 const mongoose = require("mongoose");
 const env = require("./env");
 
+const globalCache = global.__projectBallerMongo || {
+  connection: null,
+  promise: null
+};
+
+global.__projectBallerMongo = globalCache;
+
 async function connectDb() {
-  console.log(env.mongodbUri, "connecting to MongoDB...");
-  mongoose.set("strictQuery", true);
-  try {
-    await mongoose.connect(env.mongodbUri, {
-      dbName: env.mongodbDbName,
-      serverSelectionTimeoutMS: 30000,
-      socketTimeoutMS: 45000,
-      maxPoolSize: 10,
-      minPoolSize: 5,
-      retryWrites: true,
-      w: "majority",
-    });
-    console.log(`MongoDB connected: ${mongoose.connection.name}`);
-  } catch (error) {
-    console.error("MongoDB connection failed");
-    console.error(error.message);
-    throw error;
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
   }
+  if (globalCache.connection) {
+    return globalCache.connection;
+  }
+  if (globalCache.promise) {
+    return globalCache.promise;
+  }
+
+  console.log("Connecting to MongoDB...");
+  mongoose.set("strictQuery", true);
+  mongoose.set("bufferCommands", false);
+
+  globalCache.promise = mongoose
+    .connect(env.mongodbUri, {
+      dbName: env.mongodbDbName,
+      serverSelectionTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 5,
+      minPoolSize: 0,
+      retryWrites: true,
+      w: "majority"
+    })
+    .then((connection) => {
+      globalCache.connection = connection.connection;
+      console.log(`MongoDB connected: ${mongoose.connection.name}`);
+      return globalCache.connection;
+    })
+    .catch((error) => {
+      globalCache.promise = null;
+      globalCache.connection = null;
+      console.error("MongoDB connection failed");
+      console.error(error.message);
+      throw error;
+    });
+
+  return globalCache.promise;
 }
 
-module.exports = { connectDb };
+function ensureDbConnected(req, res, next) {
+  connectDb().then(() => next()).catch(next);
+}
+
+module.exports = { connectDb, ensureDbConnected };
