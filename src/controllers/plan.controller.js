@@ -84,7 +84,8 @@ const generatePlan = asyncHandler(async (req, res) => {
 });
 
 const getCurrentPlan = asyncHandler(async (req, res) => {
-  const bounds = getWeekBounds();
+  const requestedDate = req.query.weekStart ? new Date(String(req.query.weekStart)) : new Date();
+  const bounds = getWeekBounds(Number.isNaN(requestedDate.getTime()) ? new Date() : requestedDate);
   const plan = await WeeklyPlan.findOne({ user: req.user._id, weekKey: bounds.weekKey });
   res.json(new ApiResponse("Current weekly plan", plan));
 });
