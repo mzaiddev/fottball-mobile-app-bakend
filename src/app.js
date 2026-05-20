@@ -12,15 +12,6 @@ const { errorHandler, notFound } = require("./middlewares/error.middleware");
 const app = express();
 app.set("trust proxy", 1);
 
-const allowedOrigins =
-  env.clientUrl === "*"
-    ? true
-    : env.clientUrl
-        .split(",")
-        .map((origin) => origin.trim())
-        .filter(Boolean);
-
-app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(helmet());
 app.use(compression());
 app.use(cookieParser());
@@ -43,6 +34,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "Project Baller backend is running",
+    env: env.nodeEnv,
   });
 });
 
