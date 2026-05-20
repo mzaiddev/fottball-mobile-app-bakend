@@ -13,6 +13,7 @@ const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { calculateReadiness } = require("../services/readiness.service");
+const { normalizeDayLabel } = require("../utils/weekdays");
 
 const onboardingResponses = {
   pace_acceleration: "You will improve your pace and acceleration with consistent training.",
@@ -21,6 +22,36 @@ const onboardingResponses = {
   technical_ability: "You will sharpen your technical ability with focused, repeatable practice.",
   everything: "You will develop into a more complete player across every performance area."
 };
+
+const DAY_ORDER = {
+  Monday: 0,
+  Tuesday: 1,
+  Wednesday: 2,
+  Thursday: 3,
+  Friday: 4,
+  Saturday: 5,
+  Sunday: 6
+};
+
+function pickTodayOrNextSession(plan) {
+  const sessions = plan?.sessions || [];
+  if (!sessions.length) return null;
+  const todayLabel = dayjs().format("dddd");
+  const todayIndex = DAY_ORDER[todayLabel];
+  const todaySession = sessions.find((session) => normalizeDayLabel(session.dayLabel) === todayLabel);
+  if (todaySession) return todaySession;
+  return (
+    sessions
+      .filter((session) => session.type !== "rest")
+      .sort((a, b) => {
+        const aIndex = DAY_ORDER[normalizeDayLabel(a.dayLabel)] ?? 99;
+        const bIndex = DAY_ORDER[normalizeDayLabel(b.dayLabel)] ?? 99;
+        const aDistance = aIndex >= todayIndex ? aIndex - todayIndex : aIndex + 7 - todayIndex;
+        const bDistance = bIndex >= todayIndex ? bIndex - todayIndex : bIndex + 7 - todayIndex;
+        return aDistance - bDistance;
+      })[0] || null
+  );
+}
 
 const updateOnboarding = asyncHandler(async (req, res) => {
   const payload = req.body || {};
@@ -98,7 +129,7 @@ const getDashboard = asyncHandler(async (req, res) => {
   res.json(
     new ApiResponse("Dashboard snapshot", {
       readiness,
-      upcomingWorkout: plan?.sessions?.find((session) => session.type !== "rest") || null,
+      upcomingWorkout: pickTodayOrNextSession(plan),
       nutritionSummary: nutrition,
       upcomingMatches: matches,
       recentWorkouts: workouts,

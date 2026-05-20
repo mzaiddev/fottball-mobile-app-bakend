@@ -2,8 +2,7 @@ const { v4: uuid } = require("uuid");
 const AdminRule = require("../models/AdminRule");
 const RehabProtocol = require("../models/RehabProtocol");
 const { generateStructuredJson } = require("./openai.service");
-
-const dayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const { DAY_LABELS: dayLabels, normalizeDayLabels } = require("../utils/weekdays");
 
 function buildDefaultHabits(rulePayload) {
   return (rulePayload?.defaultHabitTargets || [
@@ -32,15 +31,16 @@ function createTemplateSession(dayLabel, title, type, focus, durationMin, intens
 }
 
 async function buildFallbackPlan(user, constraints) {
+  const normalizedConstraints = normalizePlanConstraints(constraints);
   const trainingRules = await AdminRule.findOne({ category: "training", isActive: true }).lean();
-  const rehabProtocols = constraints.injuries?.length
-    ? await RehabProtocol.find({ injuryType: { $in: constraints.injuries } }).lean()
+  const rehabProtocols = normalizedConstraints.injuries?.length
+    ? await RehabProtocol.find({ injuryType: { $in: normalizedConstraints.injuries } }).lean()
     : [];
   const habits = buildDefaultHabits(trainingRules?.payload);
   const sessions = [];
 
   for (const dayLabel of dayLabels) {
-    if ((constraints.matchDays || []).includes(dayLabel)) {
+    if ((normalizedConstraints.matchDays || []).includes(dayLabel)) {
       sessions.push(
         createTemplateSession(dayLabel, "Match Day", "match", "Competition", 90, "high", [
           { name: "Dynamic warm-up", sets: 1, reps: "12 min", restSec: 0, weightGuidance: "", notes: "" },
@@ -50,7 +50,7 @@ async function buildFallbackPlan(user, constraints) {
       continue;
     }
 
-    if ((constraints.teamTrainingDays || []).includes(dayLabel)) {
+    if ((normalizedConstraints.teamTrainingDays || []).includes(dayLabel)) {
       sessions.push(
         createTemplateSession(dayLabel, "Team Training", "pitch", "Tactical + technical", 75, "moderate", [
           { name: "Activation", sets: 1, reps: "10 min", restSec: 0, notes: "" },
@@ -61,7 +61,7 @@ async function buildFallbackPlan(user, constraints) {
       continue;
     }
 
-    if (sessions.filter((session) => session.type === "gym").length < (constraints.gymDays || 2)) {
+    if (sessions.filter((session) => session.type === "gym").length < (normalizedConstraints.gymDays ?? 2)) {
       sessions.push(
         createTemplateSession(dayLabel, "Strength & Conditioning", "gym", user.position || "Football performance", 60, "moderate", [
           { name: "Trap bar deadlift", sets: 4, reps: "5", restSec: 150, notes: "Leave 2 reps in reserve" },
@@ -97,7 +97,7 @@ async function buildFallbackPlan(user, constraints) {
 
   return {
     goals: user.goals,
-    constraints,
+    constraints: normalizedConstraints,
     source: "template",
     status: "pending_review",
     sessions: sessions.map((session) => ({ ...session, habits })),
@@ -106,7 +106,8 @@ async function buildFallbackPlan(user, constraints) {
 }
 
 async function generateWeeklyPlan(user, constraints) {
-  const fallback = await buildFallbackPlan(user, constraints);
+  const normalizedConstraints = normalizePlanConstraints(constraints);
+  const fallback = await buildFallbackPlan(user, normalizedConstraints);
 
   return generateStructuredJson({
     system:
@@ -115,10 +116,19 @@ async function generateWeeklyPlan(user, constraints) {
       position: user.position,
       goals: user.goals,
       onboarding: user.onboarding?.answers,
-      constraints
+      constraints: normalizedConstraints
     })}. Use this JSON shape: ${JSON.stringify(fallback)}.`,
     fallback
   });
+}
+
+function normalizePlanConstraints(constraints = {}) {
+  return {
+    ...constraints,
+    matchDays: normalizeDayLabels(constraints.matchDays),
+    teamTrainingDays: normalizeDayLabels(constraints.teamTrainingDays),
+    gymDays: Number.isFinite(Number(constraints.gymDays)) ? Number(constraints.gymDays) : 2
+  };
 }
 
 module.exports = { generateWeeklyPlan };

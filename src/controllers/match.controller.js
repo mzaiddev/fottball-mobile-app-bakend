@@ -8,6 +8,17 @@ const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { calculateReadiness } = require("../services/readiness.service");
+const { normalizeDayLabel } = require("../utils/weekdays");
+
+const DAY_ORDER = {
+  Monday: 0,
+  Tuesday: 1,
+  Wednesday: 2,
+  Thursday: 3,
+  Friday: 4,
+  Saturday: 5,
+  Sunday: 6
+};
 
 function getMatchPhase(dateTime) {
   const diff = dayjs(dateTime).startOf("day").diff(dayjs().startOf("day"), "day");
@@ -52,6 +63,79 @@ async function ensurePreparationChecklist(match) {
   return match;
 }
 
+function createMatchPlanSession(match) {
+  return {
+    sessionId: `match-${match._id}`,
+    dayLabel: dayjs(match.dateTime).format("dddd"),
+    title: `Match vs ${match.opponent}`,
+    type: "match",
+    focus: match.competitionType || "Competition",
+    durationMin: 90,
+    intensity: "high",
+    notes: match.location ? `Kick-off at ${match.location}` : "Match day",
+    exercises: [
+      { name: "Dynamic warm-up", sets: 1, reps: "12 min", restSec: 0, weightGuidance: "", notes: "" },
+      { name: "Post-match recovery", sets: 1, reps: "15 min", restSec: 0, weightGuidance: "", notes: "" }
+    ]
+  };
+}
+
+function matchFallsInPlanWeek(plan, match) {
+  const matchTime = new Date(match.dateTime).getTime();
+  return matchTime >= new Date(plan.weekStart).getTime() && matchTime <= new Date(plan.weekEnd).getTime();
+}
+
+function applyMatchToPlan(plan, match) {
+  const dayLabel = dayjs(match.dateTime).format("dddd");
+  const existing = plan.sessions.find((session) => normalizeDayLabel(session.dayLabel) === dayLabel);
+  const matchSession = createMatchPlanSession(match);
+
+  if (existing) {
+    existing.sessionId = existing.sessionId || matchSession.sessionId;
+    existing.dayLabel = dayLabel;
+    existing.title = matchSession.title;
+    existing.type = "match";
+    existing.focus = matchSession.focus;
+    existing.durationMin = matchSession.durationMin;
+    existing.intensity = matchSession.intensity;
+    existing.notes = matchSession.notes;
+    existing.exercises = matchSession.exercises;
+    return true;
+  }
+
+  plan.sessions.push(matchSession);
+  return true;
+}
+
+async function syncPlansAroundMatches(userId, matches) {
+  const plans = await WeeklyPlan.find({
+    user: userId,
+    status: { $in: ["approved", "live", "pending_review", "draft"] }
+  });
+
+  let updatedPlans = 0;
+  for (const plan of plans) {
+    let changed = false;
+    for (const match of matches) {
+      if (matchFallsInPlanWeek(plan, match)) {
+        changed = applyMatchToPlan(plan, match) || changed;
+      }
+    }
+    if (changed) {
+      plan.source = "system_adjusted";
+      plan.sessions.sort(
+        (a, b) =>
+          (DAY_ORDER[normalizeDayLabel(a.dayLabel)] ?? 99) -
+          (DAY_ORDER[normalizeDayLabel(b.dayLabel)] ?? 99)
+      );
+      await plan.save();
+      updatedPlans += 1;
+    }
+  }
+
+  return updatedPlans;
+}
+
 const createMatch = asyncHandler(async (req, res) => {
   const match = await Match.create({
     user: req.user._id,
@@ -72,6 +156,7 @@ const createMatch = asyncHandler(async (req, res) => {
       { label: "Log soreness and sleep" }
     ]
   });
+  await syncPlansAroundMatches(req.user._id, [match]);
 
   res.status(StatusCodes.CREATED).json(new ApiResponse("Match created", match));
 });
@@ -181,22 +266,14 @@ const getHistory = asyncHandler(async (req, res) => {
 });
 
 const autoAdjustPlanAroundMatches = asyncHandler(async (req, res) => {
-  const plans = await WeeklyPlan.find({ user: req.user._id, status: { $in: ["approved", "live", "pending_review"] } });
-  const matches = await Match.find({ user: req.user._id, dateTime: { $gte: dayjs().subtract(3, "day").toDate() } });
+  const matches = await Match.find({
+    user: req.user._id,
+    status: "scheduled",
+    dateTime: { $gte: dayjs().subtract(3, "day").toDate() }
+  });
+  const updatedPlans = await syncPlansAroundMatches(req.user._id, matches);
 
-  for (const plan of plans) {
-    for (const session of plan.sessions) {
-      const isMatchWindow = matches.some((match) => session.dayLabel === dayjs(match.dateTime).format("dddd"));
-      if (isMatchWindow && session.type === "gym") {
-        session.type = "recovery";
-        session.title = "Auto-adjusted recovery";
-        session.intensity = "low";
-      }
-    }
-    await plan.save();
-  }
-
-  res.json(new ApiResponse("Plans auto-adjusted around matches", { updatedPlans: plans.length }));
+  res.json(new ApiResponse("Plans auto-adjusted around matches", { updatedPlans }));
 });
 
 module.exports = {

@@ -16,6 +16,7 @@ const { notifyUser } = require("../services/notification.service");
 const { calculateReadiness } = require("../services/readiness.service");
 const { generateWeeklyPlan } = require("../services/weekBuilder.service");
 const { generateText } = require("../services/openai.service");
+const { normalizeDayLabels } = require("../utils/weekdays");
 
 async function checkPlanAllowance(userId, weekKey, chargedType = "plan_generation") {
   const count = await AIUsageLog.countDocuments({
@@ -34,11 +35,14 @@ const generatePlan = asyncHandler(async (req, res) => {
   const { weekStart, matchDays, teamTrainingDays, gymDays, injuries, position } = req.body;
   const bounds = getWeekBounds(weekStart || new Date());
   await checkPlanAllowance(req.user._id, bounds.weekKey);
+  const requestedGymDays = gymDays ?? req.user.onboarding?.answers?.gymDays;
 
   const constraints = {
-    matchDays: matchDays || req.user.onboarding?.answers?.matchDays || [],
-    teamTrainingDays: teamTrainingDays || req.user.onboarding?.answers?.teamTrainingDays || [],
-    gymDays: gymDays || req.user.onboarding?.answers?.gymDays || 2,
+    matchDays: normalizeDayLabels(matchDays || req.user.onboarding?.answers?.matchDays || []),
+    teamTrainingDays: normalizeDayLabels(teamTrainingDays || req.user.onboarding?.answers?.teamTrainingDays || []),
+    gymDays: Number.isFinite(Number(requestedGymDays))
+      ? Number(requestedGymDays)
+      : 2,
     injuries: injuries || req.user.constraints?.injuries || [],
     position: position || req.user.position
   };
