@@ -2,7 +2,7 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
-const required = ["MONGODB_URI", "JWT_SECRET", "JWT_REFRESH_SECRET"];
+const required = ["MONGODB_URI", "JWT_SECRET", "JWT_REFRESH_SECRET", "OPENAI_API_KEY"];
 
 if (process.env.NODE_ENV === "production") {
   for (const key of required) {
@@ -24,6 +24,8 @@ module.exports = {
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
   openAiApiKey: process.env.OPENAI_API_KEY || "",
   openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  openAiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS || 20000),
+  openAiMaxRetries: Number(process.env.OPENAI_MAX_RETRIES || 2),
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
     apiKey: process.env.CLOUDINARY_API_KEY || "",

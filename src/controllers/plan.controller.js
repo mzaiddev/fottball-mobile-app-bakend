@@ -2,6 +2,8 @@ const dayjs = require("dayjs");
 const { StatusCodes } = require("http-status-codes");
 const AIUsageLog = require("../models/AIUsageLog");
 const Exercise = require("../models/Exercise");
+const Match = require("../models/Match");
+const NutritionLog = require("../models/NutritionLog");
 const ProgressEntry = require("../models/ProgressEntry");
 const User = require("../models/User");
 const WeeklyPlan = require("../models/WeeklyPlan");
@@ -13,6 +15,7 @@ const { getWeekBounds } = require("../utils/date");
 const { notifyUser } = require("../services/notification.service");
 const { calculateReadiness } = require("../services/readiness.service");
 const { generateWeeklyPlan } = require("../services/weekBuilder.service");
+const { generateText } = require("../services/openai.service");
 
 async function checkPlanAllowance(userId, weekKey, chargedType = "plan_generation") {
   const count = await AIUsageLog.countDocuments({
@@ -195,25 +198,137 @@ const getInsights = asyncHandler(async (req, res) => {
   );
 });
 
+function buildCoachFallback({ readiness, plan }) {
+  const recoveryLow = (readiness.components?.recovery || 0) < 65;
+  const planCount = plan?.sessions?.length || 0;
+  return [
+    `Your readiness is ${readiness.score}.`,
+    recoveryLow
+      ? "Prioritize sleep quality, hydration, and low-intensity mobility today."
+      : "Stay consistent with your current plan and keep your next session sharp but controlled.",
+    `Your latest weekly plan has ${planCount} scheduled sessions.`
+  ].join(" ");
+}
+
+function formatCoachContext({ user, readiness, plan, recentWorkouts, nutritionLog, upcomingMatch }) {
+  return {
+    athlete: {
+      name: user.fullName,
+      position: user.position,
+      goals: user.goals || [],
+      onboarding: user.onboarding?.answers || {},
+      constraints: user.constraints || {}
+    },
+    readiness,
+    latestPlan: plan
+      ? {
+          status: plan.status,
+          source: plan.source,
+          sessions: (plan.sessions || []).slice(0, 7).map((session) => ({
+            dayLabel: session.dayLabel,
+            title: session.title,
+            type: session.type,
+            focus: session.focus,
+            durationMin: session.durationMin,
+            intensity: session.intensity,
+            exerciseCount: session.exercises?.length || 0
+          }))
+        }
+      : null,
+    recentWorkouts: recentWorkouts.map((log) => ({
+      title: log.title,
+      performedAt: log.performedAt,
+      durationMin: log.durationMin,
+      rpe: log.rpe,
+      soreness: log.soreness,
+      trainingLoad: log.trainingLoad
+    })),
+    nutritionToday: nutritionLog
+      ? {
+          totals: nutritionLog.totals,
+          dailyTargets: nutritionLog.dailyTargets,
+          mealsLogged: nutritionLog.meals?.length || 0
+        }
+      : null,
+    upcomingMatch: upcomingMatch
+      ? {
+          opponent: upcomingMatch.opponent,
+          dateTime: upcomingMatch.dateTime,
+          venue: upcomingMatch.venue,
+          competitionType: upcomingMatch.competitionType
+        }
+      : null
+  };
+}
+
 const aiCoachChat = asyncHandler(async (req, res) => {
+  const message = req.body.message?.trim();
+  if (!message) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Message is required");
+  }
+
   const bounds = getWeekBounds();
-  await AIUsageLog.create({
+  const usageLog = await AIUsageLog.create({
     user: req.user._id,
     type: "chat",
     weekKey: bounds.weekKey,
     charged: false,
-    requestSummary: req.body.message?.slice(0, 120) || "chat"
+    requestSummary: message.slice(0, 120)
   });
 
-  const plan = await WeeklyPlan.findOne({ user: req.user._id }).sort({ weekStart: -1 }).lean();
-  const readiness = await calculateReadiness(req.user);
-  const answer = `You are currently at a readiness score of ${readiness.score}. Focus on ${
-    readiness.components.recovery < 65 ? "sleep and soreness management" : "executing your current plan consistently"
-  }. Your latest weekly plan has ${plan?.sessions?.length || 0} sessions scheduled.`;
+  const today = dayjs().startOf("day").toDate();
+  const [plan, readiness, recentWorkouts, nutritionLog, upcomingMatch] = await Promise.all([
+    WeeklyPlan.findOne({ user: req.user._id }).sort({ weekStart: -1 }).lean(),
+    calculateReadiness(req.user),
+    WorkoutLog.find({ user: req.user._id }).sort({ performedAt: -1 }).limit(5).lean(),
+    NutritionLog.findOne({ user: req.user._id, date: today }).lean(),
+    Match.findOne({ user: req.user._id, status: "scheduled", dateTime: { $gte: new Date() } })
+      .sort({ dateTime: 1 })
+      .lean()
+  ]);
+
+  const context = formatCoachContext({
+    user: req.user,
+    readiness,
+    plan,
+    recentWorkouts,
+    nutritionLog,
+    upcomingMatch
+  });
+  const history = Array.isArray(req.body.history)
+    ? req.body.history.slice(-8).map((item) => ({
+        role: item.role === "coach" || item.role === "assistant" ? "assistant" : "user",
+        content: String(item.text || item.content || "").slice(0, 1000)
+      }))
+    : [];
+
+  const fallback = buildCoachFallback({ readiness, plan });
+  const aiResult = await generateText({
+    purpose: "ai_coach_chat",
+    temperature: 0.35,
+    maxTokens: 650,
+    system:
+      "You are ProjectBaller's AI football performance coach. Give concise, practical coaching for training, recovery, nutrition, match prep, and habit execution. Use the provided athlete context. Do not invent data. If the user mentions pain, injury, illness, medication, or diagnosis, give conservative guidance and recommend a qualified professional. Keep replies mobile-friendly and action-oriented.",
+    messages: [
+      {
+        role: "user",
+        content: `Athlete context JSON:\n${JSON.stringify(context)}`
+      },
+      ...history,
+      { role: "user", content: message }
+    ],
+    fallback
+  });
+
+  usageLog.status = aiResult.source === "openai" ? "success" : "fallback";
+  usageLog.responseSummary = aiResult.content.slice(0, 240);
+  usageLog.errorMessage = aiResult.errorMessage;
+  await usageLog.save();
 
   res.json(
     new ApiResponse("AI coach response", {
-      answer,
+      answer: aiResult.content,
+      source: aiResult.source,
       context: {
         readiness,
         planId: plan?._id || null
