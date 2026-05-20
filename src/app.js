@@ -34,7 +34,7 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "Project Baller backend is running",
-    env: env.nodeEnv,
+    env: env,
   });
 });
 
