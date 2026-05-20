@@ -8,6 +8,7 @@ router.get("/", controller.listMatches);
 router.get("/history", controller.getHistory);
 router.post("/auto-adjust-plan", controller.autoAdjustPlanAroundMatches);
 router.get("/:id/hub", controller.getMatchHub);
+router.patch("/:id/checklist", controller.updatePreparationChecklist);
 router.post("/:id/performance", controller.logPerformance);
 
 module.exports = router;

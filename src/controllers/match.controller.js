@@ -3,6 +3,8 @@ const { StatusCodes } = require("http-status-codes");
 const Match = require("../models/Match");
 const User = require("../models/User");
 const WeeklyPlan = require("../models/WeeklyPlan");
+const { createDefaultPreparationChecklist } = require("../data/matchPrepChecklist");
+const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { calculateReadiness } = require("../services/readiness.service");
@@ -17,6 +19,39 @@ function getMatchPhase(dateTime) {
   return "SCHEDULED";
 }
 
+function normalizePreparationChecklist(existing = []) {
+  const defaultChecklist = createDefaultPreparationChecklist();
+  return defaultChecklist.map((item) => {
+    const saved = existing.find(
+      (candidate) =>
+        candidate.id === item.id ||
+        candidate.title === item.title ||
+        candidate.label === item.title ||
+        candidate.label === item.label
+    );
+    return {
+      ...item,
+      completed: Boolean(saved?.completed),
+      completedAt: saved?.completedAt || null
+    };
+  });
+}
+
+async function ensurePreparationChecklist(match) {
+  const current = match.preparationChecklist || [];
+  const normalized = normalizePreparationChecklist(current);
+  const needsSave =
+    normalized.length !== current.length ||
+    current.some((item) => !item.id || !item.sectionId || !item.title);
+
+  if (needsSave) {
+    match.preparationChecklist = normalized;
+    await match.save();
+  }
+
+  return match;
+}
+
 const createMatch = asyncHandler(async (req, res) => {
   const match = await Match.create({
     user: req.user._id,
@@ -25,11 +60,7 @@ const createMatch = asyncHandler(async (req, res) => {
     venue: req.body.venue,
     location: req.body.location,
     competitionType: req.body.competitionType,
-    preparationChecklist: [
-      { label: "Fuel for the day" },
-      { label: "Mobility activation" },
-      { label: "Sleep target" }
-    ],
+    preparationChecklist: createDefaultPreparationChecklist(),
     gameDayChecklist: [
       { label: "Warm-up complete" },
       { label: "Hydration on track" },
@@ -47,6 +78,7 @@ const createMatch = asyncHandler(async (req, res) => {
 
 const listMatches = asyncHandler(async (req, res) => {
   const matches = await Match.find({ user: req.user._id }).sort({ dateTime: -1 });
+  await Promise.all(matches.map((match) => ensurePreparationChecklist(match)));
   res.json(
     new ApiResponse(
       "Matches",
@@ -60,6 +92,10 @@ const listMatches = asyncHandler(async (req, res) => {
 
 const getMatchHub = asyncHandler(async (req, res) => {
   const match = await Match.findOne({ _id: req.params.id, user: req.user._id });
+  if (!match) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Match not found");
+  }
+  await ensurePreparationChecklist(match);
   const phase = getMatchPhase(match.dateTime);
 
   res.json(
@@ -74,6 +110,41 @@ const getMatchHub = asyncHandler(async (req, res) => {
             : ["Recovery workout", "Protein + carbs", "Sleep quality log"]
     })
   );
+});
+
+const updatePreparationChecklist = asyncHandler(async (req, res) => {
+  const match = await Match.findOne({ _id: req.params.id, user: req.user._id });
+  if (!match) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Match not found");
+  }
+
+  const completedIds = Array.isArray(req.body.completedIds) ? req.body.completedIds.map(String) : null;
+  const updates = Array.isArray(req.body.items) ? req.body.items : null;
+  const now = new Date();
+
+  match.preparationChecklist = normalizePreparationChecklist(match.preparationChecklist).map((item) => {
+    if (completedIds) {
+      const completed = completedIds.includes(item.id);
+      return {
+        ...item,
+        completed,
+        completedAt: completed ? item.completedAt || now : null
+      };
+    }
+
+    const update = updates?.find((candidate) => String(candidate.id) === item.id);
+    if (!update) return item;
+
+    const completed = Boolean(update.completed);
+    return {
+      ...item,
+      completed,
+      completedAt: completed ? item.completedAt || now : null
+    };
+  });
+
+  await match.save();
+  res.json(new ApiResponse("Preparation checklist updated", match));
 });
 
 const logPerformance = asyncHandler(async (req, res) => {
@@ -132,6 +203,7 @@ module.exports = {
   createMatch,
   listMatches,
   getMatchHub,
+  updatePreparationChecklist,
   logPerformance,
   getHistory,
   autoAdjustPlanAroundMatches

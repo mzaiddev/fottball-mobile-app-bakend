@@ -92,7 +92,23 @@ const commentOnPost = asyncHandler(async (req, res) => {
   if (!post) {
     throw new ApiError(StatusCodes.NOT_FOUND, "Post not found");
   }
-  post.comments.push({ user: req.user._id, text: req.body.text });
+  if (!req.body.text?.trim()) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Comment text is required");
+  }
+
+  const parentCommentId = req.body.parentCommentId;
+  if (parentCommentId) {
+    const parentExists = post.comments.some((comment) => comment._id?.toString() === parentCommentId);
+    if (!parentExists) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, "Parent comment not found");
+    }
+  }
+
+  post.comments.push({
+    user: req.user._id,
+    parentComment: parentCommentId || undefined,
+    text: req.body.text.trim()
+  });
   await post.save();
   res.json(new ApiResponse("Comment added", await populatePost(post._id)));
 });

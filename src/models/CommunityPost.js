@@ -6,13 +6,16 @@ const commentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User"
     },
+    parentComment: {
+      type: mongoose.Schema.Types.ObjectId
+    },
     text: String,
     createdAt: {
       type: Date,
       default: Date.now
     }
   },
-  { _id: false }
+  { _id: true }
 );
 
 const communityPostSchema = new mongoose.Schema(

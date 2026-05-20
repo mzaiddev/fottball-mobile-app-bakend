@@ -2,8 +2,13 @@ const mongoose = require("mongoose");
 
 const checklistSchema = new mongoose.Schema(
   {
+    id: String,
+    sectionId: String,
+    title: String,
     label: String,
-    completed: { type: Boolean, default: false }
+    subtitle: String,
+    completed: { type: Boolean, default: false },
+    completedAt: Date
   },
   { _id: false }
 );
