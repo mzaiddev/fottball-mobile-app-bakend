@@ -1,7 +1,6 @@
 const crypto = require("crypto");
 const multer = require("multer");
 const { StatusCodes } = require("http-status-codes");
-const Subscription = require("../models/Subscription");
 const User = require("../models/User");
 const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
@@ -9,6 +8,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const { cloudinary } = require("../config/cloudinary");
 const env = require("../config/env");
 const { createCheckoutSession, stripe } = require("../services/payment.service");
+const { upsertRevenueCatSubscription, upsertStripeSubscription } = require("../services/billing.service");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -52,20 +52,16 @@ const stripeWebhook = asyncHandler(async (req, res) => {
   const signature = req.headers["stripe-signature"];
   const event = stripe.webhooks.constructEvent(req.body, signature, env.stripeWebhookSecret);
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    const user = await User.findOne({ email: session.customer_email });
-    if (user) {
-      await Subscription.create({
-        user: user._id,
-        provider: "stripe",
-        status: "trialing",
-        planId: session.metadata?.priceId || session.subscription,
-        planName: session.metadata?.planName || "Project Baller Plan",
-        externalCustomerId: session.customer,
-        externalSubscriptionId: session.subscription
-      });
-    }
+  if ([
+    "checkout.session.completed",
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+    "invoice.paid",
+    "invoice.payment_failed",
+    "charge.refunded"
+  ].includes(event.type)) {
+    await upsertStripeSubscription(event);
   }
 
   res.json({ received: true });
@@ -83,18 +79,7 @@ const revenueCatWebhook = asyncHandler(async (req, res) => {
   if (appUserId) {
     const user = await User.findById(appUserId);
     if (user) {
-      await Subscription.findOneAndUpdate(
-        { user: user._id, provider: "revenuecat" },
-        {
-          user: user._id,
-          provider: "revenuecat",
-          status: event.type === "CANCELLATION" ? "canceled" : "active",
-          planId: event.product_id,
-          externalSubscriptionId: event.transaction_id,
-          metadata: event
-        },
-        { upsert: true, new: true }
-      );
+      await upsertRevenueCatSubscription(event);
     }
   }
 

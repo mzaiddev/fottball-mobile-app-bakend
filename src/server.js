@@ -5,6 +5,7 @@ const env = require("./config/env");
 const { connectDb } = require("./config/db");
 const User = require("./models/User");
 const { bootstrapDefaults } = require("./services/bootstrap.service");
+const { syncExpiredSubscriptions } = require("./services/billing.service");
 const { calculateReadiness } = require("./services/readiness.service");
 const { initializeSocket } = require("./sockets");
 
@@ -21,6 +22,7 @@ async function start() {
       const readiness = await calculateReadiness(user);
       await User.findByIdAndUpdate(user._id, { readiness });
     }
+    await syncExpiredSubscriptions();
   });
 
   server.listen(env.port, () => {

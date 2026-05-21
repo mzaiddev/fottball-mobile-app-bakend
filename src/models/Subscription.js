@@ -16,7 +16,7 @@ const subscriptionSchema = new mongoose.Schema(
     planName: String,
     status: {
       type: String,
-      enum: ["trialing", "active", "canceled", "past_due", "inactive"],
+      enum: ["trialing", "active", "canceled", "past_due", "inactive", "expired", "refunded"],
       default: "inactive"
     },
     amount: Number,
@@ -26,6 +26,10 @@ const subscriptionSchema = new mongoose.Schema(
     },
     trialEndsAt: Date,
     currentPeriodEnd: Date,
+    startedAt: Date,
+    canceledAt: Date,
+    expiredAt: Date,
+    lastRenewedAt: Date,
     externalCustomerId: String,
     externalSubscriptionId: String,
     entitlements: [String],

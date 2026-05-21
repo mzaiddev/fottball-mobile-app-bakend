@@ -3,6 +3,7 @@ const { StatusCodes } = require("http-status-codes");
 const Match = require("../models/Match");
 const Notification = require("../models/Notification");
 const NutritionLog = require("../models/NutritionLog");
+const PushToken = require("../models/PushToken");
 const Referral = require("../models/Referral");
 const Subscription = require("../models/Subscription");
 const SupportTicket = require("../models/SupportTicket");
@@ -13,6 +14,8 @@ const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { calculateReadiness } = require("../services/readiness.service");
+const { hasActiveEntitlement } = require("../services/billing.service");
+const { trackEvent } = require("../services/analytics.service");
 const { normalizeDayLabel } = require("../utils/weekdays");
 
 const onboardingResponses = {
@@ -116,7 +119,7 @@ const connectWearable = asyncHandler(async (req, res) => {
 
 const getDashboard = asyncHandler(async (req, res) => {
   const [plan, nutrition, matches, workouts, subscription] = await Promise.all([
-    WeeklyPlan.findOne({ user: req.user._id }).sort({ weekStart: -1 }).lean(),
+    WeeklyPlan.findOne({ user: req.user._id, status: { $in: ["approved", "live"] } }).sort({ weekStart: -1 }).lean(),
     NutritionLog.findOne({ user: req.user._id }).sort({ date: -1 }).lean(),
     Match.find({ user: req.user._id, dateTime: { $gte: dayjs().subtract(1, "day").toDate() } }).sort({ dateTime: 1 }).limit(3).lean(),
     WorkoutLog.find({ user: req.user._id }).sort({ performedAt: -1 }).limit(5).lean(),
@@ -124,7 +127,9 @@ const getDashboard = asyncHandler(async (req, res) => {
   ]);
 
   const readiness = await calculateReadiness(req.user);
+  const entitled = await hasActiveEntitlement(req.user._id);
   await User.findByIdAndUpdate(req.user._id, { readiness });
+  await trackEvent({ user: req.user._id, source: "app", type: "dashboard_view", feature: "Dashboard" });
 
   res.json(
     new ApiResponse("Dashboard snapshot", {
@@ -133,7 +138,8 @@ const getDashboard = asyncHandler(async (req, res) => {
       nutritionSummary: nutrition,
       upcomingMatches: matches,
       recentWorkouts: workouts,
-      subscription
+      subscription,
+      entitled
     })
   );
 });
@@ -165,6 +171,24 @@ const createSupportTicket = asyncHandler(async (req, res) => {
   res.status(StatusCodes.CREATED).json(new ApiResponse("Support ticket created", ticket));
 });
 
+const registerPushToken = asyncHandler(async (req, res) => {
+  const token = await PushToken.findOneAndUpdate(
+    { token: req.body.token },
+    {
+      user: req.user._id,
+      token: req.body.token,
+      provider: req.body.provider || "expo",
+      platform: req.body.platform,
+      deviceId: req.body.deviceId,
+      isActive: true,
+      lastSeenAt: new Date()
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  res.json(new ApiResponse("Push token registered", token));
+});
+
 const getReferralStats = asyncHandler(async (req, res) => {
   const referrals = await Referral.find({ referrer: req.user._id }).populate("referredUser", "fullName email");
   const stats = {
@@ -186,5 +210,6 @@ module.exports = {
   listNotifications,
   markNotificationRead,
   createSupportTicket,
+  registerPushToken,
   getReferralStats
 };

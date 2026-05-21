@@ -2,13 +2,17 @@ const Recipe = require("../models/Recipe");
 const { generateStructuredJson } = require("./openai.service");
 
 function getActivityMultiplier(level) {
+  const normalized = String(level || "").toLowerCase().replace(/\s+/g, "_");
   const map = {
     low: 1.35,
+    lightly_active: 1.35,
     moderate: 1.55,
+    moderately_active: 1.55,
     high: 1.75,
+    very_active: 1.75,
     elite: 1.95
   };
-  return map[level] || 1.55;
+  return map[normalized] || 1.55;
 }
 
 function getGoalAdjustment(goal) {
@@ -20,7 +24,7 @@ function getGoalAdjustment(goal) {
   return map[goal] || 0;
 }
 
-function calculateTargets(user) {
+function calculateTargets(user, rules = {}) {
   const age = user.onboarding?.answers?.age || 18;
   const weightKg = user.onboarding?.answers?.weightKg || 70;
   const heightCm = user.onboarding?.answers?.heightCm || 175;
@@ -34,10 +38,13 @@ function calculateTargets(user) {
       : 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
 
   const calories = Math.round(bmr * getActivityMultiplier(activityLevel) + getGoalAdjustment(goal));
-  const protein = Math.round(weightKg * 2);
+  const proteinMultiplier = Number.isFinite(Number(rules.protein)) ? Number(rules.protein) : 2;
+  const hydrationLiters = Number.isFinite(Number(rules.hydration)) ? Number(rules.hydration) : null;
+  const carbLoad = Number.isFinite(Number(rules.carbLoad)) ? Number(rules.carbLoad) : 1;
+  const protein = Math.round(weightKg * proteinMultiplier);
   const fats = Math.round(weightKg * 0.9);
-  const carbs = Math.round((calories - protein * 4 - fats * 9) / 4);
-  const hydrationMl = Math.round(weightKg * 40);
+  const carbs = Math.max(0, Math.round(((calories - protein * 4 - fats * 9) / 4) * carbLoad));
+  const hydrationMl = hydrationLiters ? Math.round(hydrationLiters * 1000) : Math.round(weightKg * 40);
 
   return { calories, protein, carbs, fats, hydrationMl };
 }

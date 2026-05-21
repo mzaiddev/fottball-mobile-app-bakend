@@ -2,6 +2,7 @@ const { StatusCodes } = require("http-status-codes");
 const dayjs = require("dayjs");
 const AdminRule = require("../models/AdminRule");
 const AIUsageLog = require("../models/AIUsageLog");
+const AnalyticsEvent = require("../models/AnalyticsEvent");
 const Exercise = require("../models/Exercise");
 const Match = require("../models/Match");
 const Notification = require("../models/Notification");
@@ -9,12 +10,15 @@ const NutritionLog = require("../models/NutritionLog");
 const Recipe = require("../models/Recipe");
 const RehabProtocol = require("../models/RehabProtocol");
 const Subscription = require("../models/Subscription");
+const RevenueEvent = require("../models/RevenueEvent");
 const SupportTicket = require("../models/SupportTicket");
 const User = require("../models/User");
 const WeeklyPlan = require("../models/WeeklyPlan");
 const WorkoutLog = require("../models/WorkoutLog");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
+const { notifyUser } = require("../services/notification.service");
+const { updateManualSubscription } = require("../services/billing.service");
 
 function slugify(value) {
   return String(value || "")
@@ -54,7 +58,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
 
 const getAnalytics = asyncHandler(async (req, res) => {
   const monthStart = startOfMonth();
-  const [users, activeUsers, workouts, matches, nutritionLogs, posts, aiChats, subscriptions] = await Promise.all([
+  const [users, activeUsers, workouts, matches, nutritionLogs, posts, aiChats, subscriptions, featureEvents, revenueEvents] = await Promise.all([
     User.countDocuments(),
     User.countDocuments({ lastActiveAt: { $gte: dayjs().subtract(1, "day").toDate() } }),
     WorkoutLog.countDocuments({ createdAt: { $gte: monthStart } }),
@@ -62,17 +66,32 @@ const getAnalytics = asyncHandler(async (req, res) => {
     NutritionLog.countDocuments({ createdAt: { $gte: monthStart } }),
     require("../models/CommunityPost").countDocuments({ createdAt: { $gte: monthStart } }),
     AIUsageLog.countDocuments({ type: "chat", createdAt: { $gte: monthStart } }),
-    Subscription.find({ status: { $in: ["trialing", "active"] } }).lean()
+    Subscription.find({ status: { $in: ["trialing", "active"] } }).lean(),
+    AnalyticsEvent.aggregate([
+      { $match: { occurredAt: { $gte: monthStart } } },
+      { $group: { _id: "$feature", count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]),
+    RevenueEvent.aggregate([
+      { $match: { occurredAt: { $gte: dayjs().subtract(11, "month").startOf("month").toDate() }, type: { $in: ["checkout_completed", "trial_converted", "renewed", "manual_update"] } } },
+      { $group: { _id: { year: { $year: "$occurredAt" }, month: { $month: "$occurredAt" } }, value: { $sum: { $ifNull: ["$amount", 0] } } } }
+    ])
   ]);
 
-  const monthlyRevenue = subscriptions.reduce((sum, sub) => sum + Number(sub.amount || 0), 0);
-  const featureUsage = [
+  const monthlyRevenue = revenueEvents
+    .filter((item) => item._id.year === dayjs().year() && item._id.month === dayjs().month() + 1)
+    .reduce((sum, item) => sum + Number(item.value || 0), 0) || subscriptions.reduce((sum, sub) => sum + Number(sub.amount || 0), 0);
+  const fallbackFeatureUsage = [
     { name: "Weekly Plan", count: await WeeklyPlan.countDocuments({ createdAt: { $gte: monthStart } }) },
     { name: "Nutrition Logging", count: nutritionLogs },
     { name: "Match Day Hub", count: matches },
     { name: "Community", count: posts },
     { name: "AI Chat", count: aiChats }
   ];
+  const featureUsage = featureEvents.length
+    ? featureEvents.map((item) => ({ name: item._id || "Unknown", count: item.count }))
+    : fallbackFeatureUsage;
+  const revenueByMonth = new Map(revenueEvents.map((item) => [`${item._id.year}-${item._id.month}`, Number(item.value || 0)]));
 
   res.json(
     new ApiResponse("Analytics", {
@@ -83,10 +102,13 @@ const getAnalytics = asyncHandler(async (req, res) => {
       averageSessionsPerUser: users ? Number((workouts / users).toFixed(2)) : 0,
       arpu: users ? Number((monthlyRevenue / users).toFixed(2)) : 0,
       featureUsage,
-      revenueBars: Array.from({ length: 12 }, (_, index) => ({
-        label: dayjs().subtract(11 - index, "month").format("MMM"),
-        value: index === 11 ? monthlyRevenue : 0
-      }))
+      revenueBars: Array.from({ length: 12 }, (_, index) => {
+        const month = dayjs().subtract(11 - index, "month");
+        return {
+          label: month.format("MMM"),
+          value: revenueByMonth.get(`${month.year()}-${month.month() + 1}`) || 0
+        };
+      })
     })
   );
 });
@@ -244,7 +266,7 @@ const listSubscriptions = asyncHandler(async (req, res) => {
 });
 
 const updateSubscription = asyncHandler(async (req, res) => {
-  const item = await Subscription.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate("user", "fullName email");
+  const item = await updateManualSubscription(req.params.id, req.body);
   res.json(new ApiResponse("Subscription updated", item));
 });
 
@@ -289,15 +311,8 @@ const sendNotification = asyncHandler(async (req, res) => {
   }
 
   const users = await User.find(userFilter).select("_id").lean();
-  const notifications = await Notification.insertMany(
-    users.map((user) => ({
-      user: user._id,
-      type: "admin",
-      title,
-      body,
-      data: { ...(data || {}), segment },
-      sentAt: new Date()
-    }))
+  const notifications = await Promise.all(
+    users.map((user) => notifyUser(user._id, "admin", title, body, { ...(data || {}), segment }))
   );
 
   res.status(StatusCodes.CREATED).json(new ApiResponse("Notification sent", { sent: notifications.length, notifications }));

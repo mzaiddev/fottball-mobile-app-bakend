@@ -16,8 +16,16 @@ async function createCheckoutSession({ customerEmail, priceId, successUrl, cance
     payment_method_types: ["card"],
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
+    metadata: {
+      priceId,
+      planName: "Project Baller Plan"
+    },
     subscription_data: {
-      trial_period_days: trialDays
+      trial_period_days: trialDays,
+      metadata: {
+        priceId,
+        planName: "Project Baller Plan"
+      }
     },
     success_url: successUrl,
     cancel_url: cancelUrl

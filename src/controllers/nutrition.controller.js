@@ -10,15 +10,18 @@ const asyncHandler = require("../utils/asyncHandler");
 const { getWeekBounds } = require("../utils/date");
 const { calculateReadiness } = require("../services/readiness.service");
 const { calculateTargets, generateMealPlan } = require("../services/nutrition.service");
+const { getAdminRuleSettings } = require("../services/adminRules.service");
+const { trackEvent } = require("../services/analytics.service");
 
 async function getOrCreateTodayLog(user) {
   const date = dayjs().startOf("day").toDate();
   let log = await NutritionLog.findOne({ user: user._id, date });
   if (!log) {
+    const rules = await getAdminRuleSettings();
     log = await NutritionLog.create({
       user: user._id,
       date,
-      dailyTargets: calculateTargets(user),
+      dailyTargets: calculateTargets(user, rules),
       meals: []
     });
   }
@@ -53,6 +56,7 @@ const addMeal = asyncHandler(async (req, res) => {
 
   const readiness = await calculateReadiness(req.user);
   await User.findByIdAndUpdate(req.user._id, { readiness });
+  await trackEvent({ user: req.user._id, source: "app", type: "meal_logged", feature: "Nutrition Logging", metadata: { mealType: req.body.mealType } });
 
   res.status(StatusCodes.CREATED).json(new ApiResponse("Meal logged", { log, readiness }));
 });
@@ -70,6 +74,7 @@ const removeMeal = asyncHandler(async (req, res) => {
 
   const readiness = await calculateReadiness(req.user);
   await User.findByIdAndUpdate(req.user._id, { readiness });
+  await trackEvent({ user: req.user._id, source: "app", type: "hydration_logged", feature: "Nutrition Logging", metadata: { hydrationMl: req.body.hydrationMl } });
   res.json(new ApiResponse("Meal removed", { log, readiness }));
 });
 
@@ -103,7 +108,8 @@ const generateDailyMealPlan = asyncHandler(async (req, res) => {
     requestSummary: "Daily meal plan request"
   });
 
-  const targets = calculateTargets(req.user);
+  const rules = await getAdminRuleSettings();
+  const targets = calculateTargets(req.user, rules);
   const plan = await generateMealPlan(req.user, targets);
   res.json(new ApiResponse("Meal plan generated", { targets, plan }));
 });

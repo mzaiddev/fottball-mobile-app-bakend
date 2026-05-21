@@ -15,7 +15,15 @@ const notificationSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
-    sentAt: Date
+    sentAt: Date,
+    deliveryStatus: {
+      type: String,
+      enum: ["queued", "sent", "failed", "skipped"],
+      default: "queued"
+    },
+    deliveredAt: Date,
+    deliveryError: String,
+    pushTickets: [mongoose.Schema.Types.Mixed]
   },
   { timestamps: true }
 );

@@ -6,6 +6,15 @@ const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { signAccessToken, signRefreshToken } = require("../utils/tokens");
+const { getRolePermissions } = require("../services/adminRules.service");
+
+function withPermissions(user) {
+  const plain = user?.toObject ? user.toObject() : user;
+  if (plain && plain.role !== "user") {
+    plain.permissions = getRolePermissions(plain.role);
+  }
+  return plain;
+}
 
 const register = asyncHandler(async (req, res) => {
   const { fullName, email, password, acceptedTerms, referralCodeEntered } = req.body;
@@ -44,7 +53,7 @@ const register = asyncHandler(async (req, res) => {
 
   res.status(StatusCodes.CREATED).json(
     new ApiResponse("Account created", {
-      user,
+      user: withPermissions(user),
       accessToken: signAccessToken(user),
       refreshToken: signRefreshToken(user)
     })
@@ -66,7 +75,7 @@ const login = asyncHandler(async (req, res) => {
 
   res.json(
     new ApiResponse("Login successful", {
-      user: safeUser,
+      user: withPermissions(safeUser),
       accessToken: signAccessToken(safeUser),
       refreshToken: signRefreshToken(safeUser)
     })
@@ -74,7 +83,7 @@ const login = asyncHandler(async (req, res) => {
 });
 
 const me = asyncHandler(async (req, res) => {
-  res.json(new ApiResponse("Current user", req.user));
+  res.json(new ApiResponse("Current user", withPermissions(req.user)));
 });
 
 const validateReferralCode = asyncHandler(async (req, res) => {

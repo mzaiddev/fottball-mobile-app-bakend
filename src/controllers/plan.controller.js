@@ -13,12 +13,16 @@ const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { getWeekBounds } = require("../utils/date");
 const { notifyUser } = require("../services/notification.service");
+const { getAdminRuleSettings } = require("../services/adminRules.service");
+const { hasActiveEntitlement } = require("../services/billing.service");
+const { trackEvent } = require("../services/analytics.service");
 const { calculateReadiness } = require("../services/readiness.service");
 const { generateWeeklyPlan } = require("../services/weekBuilder.service");
 const { generateText } = require("../services/openai.service");
 const { normalizeDayLabels } = require("../utils/weekdays");
 
 async function checkPlanAllowance(userId, weekKey, chargedType = "plan_generation") {
+  const rules = await getAdminRuleSettings();
   const count = await AIUsageLog.countDocuments({
     user: userId,
     weekKey,
@@ -26,7 +30,7 @@ async function checkPlanAllowance(userId, weekKey, chargedType = "plan_generatio
     charged: true
   });
 
-  if (count >= 2) {
+  if (count >= Number(rules.regens || 2)) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Weekly AI regeneration allowance reached");
   }
 }
@@ -34,6 +38,10 @@ async function checkPlanAllowance(userId, weekKey, chargedType = "plan_generatio
 const generatePlan = asyncHandler(async (req, res) => {
   const { weekStart, matchDays, teamTrainingDays, gymDays, injuries, position } = req.body;
   const bounds = getWeekBounds(weekStart || new Date());
+  const entitled = await hasActiveEntitlement(req.user._id);
+  if (!entitled) {
+    throw new ApiError(StatusCodes.PAYMENT_REQUIRED, "An active trial or subscription is required to generate plans");
+  }
   await checkPlanAllowance(req.user._id, bounds.weekKey);
   const requestedGymDays = gymDays ?? req.user.onboarding?.answers?.gymDays;
 
@@ -48,6 +56,9 @@ const generatePlan = asyncHandler(async (req, res) => {
   };
 
   const generated = await generateWeeklyPlan(req.user, constraints);
+  const rules = await getAdminRuleSettings();
+  const planStatus = rules.requireApproval ? "pending_review" : (generated.status === "approved" ? "approved" : "live");
+  const reviewStatus = rules.requireApproval ? "pending" : "approved";
 
   const plan = await WeeklyPlan.findOneAndUpdate(
     { user: req.user._id, weekKey: bounds.weekKey },
@@ -59,9 +70,15 @@ const generatePlan = asyncHandler(async (req, res) => {
       goals: req.user.goals,
       constraints,
       source: generated.source || "ai",
-      status: generated.status || "pending_review",
+      status: planStatus,
       sessions: generated.sessions || [],
       whyThis: generated.whyThis || "",
+      adminReview: {
+        status: reviewStatus,
+        reviewedBy: rules.requireApproval ? undefined : req.user._id,
+        reviewedAt: rules.requireApproval ? undefined : new Date(),
+        notes: rules.requireApproval ? "" : "Auto-approved by Admin Rules"
+      },
       aiMeta: {
         generatedAt: new Date()
       }
@@ -74,11 +91,18 @@ const generatePlan = asyncHandler(async (req, res) => {
     type: "plan_generation",
     weekKey: bounds.weekKey,
     charged: true,
+    limit: Number(rules.regens || 2),
     requestSummary: "Weekly plan generation",
     responseSummary: `Generated ${plan.sessions.length} sessions`
   });
 
-  await notifyUser(req.user._id, "plan", "Plan generated", "Your weekly plan is ready for admin review.");
+  await trackEvent({ user: req.user._id, source: "app", type: "plan_generated", feature: "Weekly Plan", metadata: { weekKey: bounds.weekKey, status: plan.status } });
+  await notifyUser(
+    req.user._id,
+    "plan",
+    rules.requireApproval ? "Plan pending review" : "Plan is live",
+    rules.requireApproval ? "Your weekly plan is ready for admin review." : "Your approved weekly sessions are ready."
+  );
 
   res.status(StatusCodes.CREATED).json(new ApiResponse("Weekly plan generated", plan));
 });
@@ -86,8 +110,25 @@ const generatePlan = asyncHandler(async (req, res) => {
 const getCurrentPlan = asyncHandler(async (req, res) => {
   const requestedDate = req.query.weekStart ? new Date(String(req.query.weekStart)) : new Date();
   const bounds = getWeekBounds(Number.isNaN(requestedDate.getTime()) ? new Date() : requestedDate);
-  const plan = await WeeklyPlan.findOne({ user: req.user._id, weekKey: bounds.weekKey });
-  res.json(new ApiResponse("Current weekly plan", plan));
+  const approvedPlan = await WeeklyPlan.findOne({
+    user: req.user._id,
+    weekKey: bounds.weekKey,
+    status: { $in: ["approved", "live"] }
+  }).lean();
+  if (approvedPlan) {
+    return res.json(new ApiResponse("Current weekly plan", { ...approvedPlan, playerVisibility: "live" }));
+  }
+
+  if (String(req.query.includePending) === "true") {
+    const pendingPlan = await WeeklyPlan.findOne({
+      user: req.user._id,
+      weekKey: bounds.weekKey,
+      status: { $in: ["draft", "pending_review"] }
+    }).lean();
+    return res.json(new ApiResponse("Current weekly plan", pendingPlan ? { ...pendingPlan, playerVisibility: "pending" } : null));
+  }
+
+  return res.json(new ApiResponse("Current weekly plan", null));
 });
 
 const regeneratePlan = asyncHandler(async (req, res) => {
@@ -114,6 +155,13 @@ const logWorkout = asyncHandler(async (req, res) => {
 
   const readiness = await calculateReadiness(req.user);
   await User.findByIdAndUpdate(req.user._id, { readiness });
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: "session_completed",
+    feature: "Workout Runner",
+    metadata: { weeklyPlan: log.weeklyPlan, sessionId: log.sessionId, durationMin: log.durationMin, trainingLoad: log.trainingLoad }
+  });
 
   res.status(StatusCodes.CREATED).json(new ApiResponse("Workout logged", { log, readiness }));
 });
@@ -329,6 +377,7 @@ const aiCoachChat = asyncHandler(async (req, res) => {
   usageLog.responseSummary = aiResult.content.slice(0, 240);
   usageLog.errorMessage = aiResult.errorMessage;
   await usageLog.save();
+  await trackEvent({ user: req.user._id, source: "app", type: "ai_chat", feature: "AI Coach", metadata: { source: aiResult.source } });
 
   res.json(
     new ApiResponse("AI coach response", {

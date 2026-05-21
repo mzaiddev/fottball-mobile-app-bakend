@@ -4,6 +4,7 @@ const env = require("../config/env");
 const User = require("../models/User");
 const ApiError = require("../utils/ApiError");
 const asyncHandler = require("../utils/asyncHandler");
+const { hasPermission } = require("../services/adminRules.service");
 
 const protect = asyncHandler(async (req, res, next) => {
   const header = req.headers.authorization || "";
@@ -33,4 +34,13 @@ function authorize(...roles) {
   };
 }
 
-module.exports = { protect, authorize };
+function requirePermission(permission) {
+  return (req, res, next) => {
+    if (!req.user || !hasPermission(req.user.role, permission)) {
+      return next(new ApiError(StatusCodes.FORBIDDEN, "You do not have permission for this admin area"));
+    }
+    return next();
+  };
+}
+
+module.exports = { protect, authorize, requirePermission };
