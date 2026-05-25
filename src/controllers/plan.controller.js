@@ -17,8 +17,9 @@ const { getAdminRuleSettings } = require("../services/adminRules.service");
 const { hasActiveEntitlement } = require("../services/billing.service");
 const { trackEvent } = require("../services/analytics.service");
 const { calculateReadiness } = require("../services/readiness.service");
+const { calculateTargets } = require("../services/nutrition.service");
 const { generateWeeklyPlan } = require("../services/weekBuilder.service");
-const { generateText } = require("../services/openai.service");
+const { generateStructuredJson, generateText } = require("../services/openai.service");
 const { normalizeDayLabels } = require("../utils/weekdays");
 
 async function checkPlanAllowance(userId, weekKey, chargedType = "plan_generation") {
@@ -105,6 +106,139 @@ const generatePlan = asyncHandler(async (req, res) => {
   );
 
   res.status(StatusCodes.CREATED).json(new ApiResponse("Weekly plan generated", plan));
+});
+
+function normalizeNutritionGoal(goal) {
+  const normalized = String(goal || "").toLowerCase();
+  if (normalized.includes("lose")) return "lose_weight";
+  if (normalized.includes("gain")) return "gain_weight";
+  return "maintain";
+}
+
+function timelineWeeks(goalTimeline) {
+  const normalized = String(goalTimeline || "").toLowerCase();
+  if (normalized.includes("1 month")) return 4;
+  if (normalized.includes("3 month")) return 12;
+  if (normalized.includes("6 month")) return 24;
+  return 8;
+}
+
+function buildPreviewUser(payload) {
+  const answers = payload.answers || {};
+  return {
+    fullName: payload.name || "Player",
+    position: answers.position || payload.position,
+    goals: payload.goals || [],
+    constraints: payload.constraints || {},
+    onboarding: {
+      answers: {
+        ...answers,
+        gender: answers.gender || "male",
+        heightCm: Number(answers.heightCm) || 175,
+        weightKg: Number(answers.weightKg) || 70,
+        age: Number(answers.age) || 18,
+        activityLevel: answers.activityLevel || "Moderately Active",
+        nutritionGoal: normalizeNutritionGoal(answers.nutritionGoal || payload.weightGoal)
+      }
+    }
+  };
+}
+
+function buildPlanPreview({ payload, user, targets }) {
+  const answers = user.onboarding.answers;
+  const currentWeight = Number(answers.weightKg) || 70;
+  const heightM = (Number(answers.heightCm) || 175) / 100;
+  const goal = normalizeNutritionGoal(answers.nutritionGoal);
+  const weeks = timelineWeeks(payload.goalTimeline || answers.goalTimeline);
+  const weeklyChange = goal === "lose_weight" ? -0.5 : goal === "gain_weight" ? 0.35 : 0;
+  const targetWeight = Number((currentWeight + weeklyChange * weeks).toFixed(1));
+  const healthyMin = Number((18.5 * heightM * heightM).toFixed(1));
+  const healthyMax = Number((24.9 * heightM * heightM).toFixed(1));
+  const bmi = Number((currentWeight / (heightM * heightM)).toFixed(1));
+
+  return {
+    targetWeight,
+    weightRange: {
+      min: healthyMin,
+      max: healthyMax
+    },
+    bmi: {
+      current: bmi,
+      targetMin: 18.5,
+      targetMax: 24.9
+    },
+    dailyTargets: targets,
+    timeline: {
+      weeks,
+      weeklyChangeKg: Math.abs(weeklyChange)
+    },
+    summary: {
+      focus: payload.holdback || payload.improve || "Consistent performance",
+      source: "fallback",
+      headline: "Your football performance plan is ready.",
+      body: "This preview balances your onboarding answers with training, recovery, and nutrition targets.",
+      highlights: [
+        "Hit your daily macro targets consistently.",
+        "Train around match and team training days.",
+        "Keep recovery habits simple and repeatable."
+      ]
+    }
+  };
+}
+
+async function personalizePlanPreview({ payload, user, fallback }) {
+  const aiPreview = await generateStructuredJson({
+    system:
+      "You create concise onboarding plan previews for football players. Keep the numeric values exactly as provided. Personalize the summary, highlights, and focus notes using the athlete profile. Return JSON only.",
+    prompt: `Create a personalized ProjectBaller onboarding plan preview. Athlete payload: ${JSON.stringify({
+      name: user.fullName,
+      position: user.position,
+      goals: user.goals,
+      answers: user.onboarding?.answers,
+      constraints: user.constraints,
+      requestedFocus: {
+        improve: payload.improve,
+        holdback: payload.holdback,
+        weightGoal: payload.weightGoal,
+        goalTimeline: payload.goalTimeline
+      }
+    })}. Numeric preview that must not be changed: ${JSON.stringify({
+      targetWeight: fallback.targetWeight,
+      weightRange: fallback.weightRange,
+      bmi: fallback.bmi,
+      dailyTargets: fallback.dailyTargets,
+      timeline: fallback.timeline
+    })}. Return this exact shape: ${JSON.stringify(fallback)}.`,
+    fallback,
+    temperature: 0.25,
+    maxTokens: 1200
+  });
+
+  return {
+    ...fallback,
+    targetWeight: fallback.targetWeight,
+    weightRange: fallback.weightRange,
+    bmi: fallback.bmi,
+    dailyTargets: fallback.dailyTargets,
+    timeline: fallback.timeline,
+    summary: {
+      ...fallback.summary,
+      ...(aiPreview.summary || {}),
+      source: aiPreview.summary?.source === "fallback" ? "fallback" : "openai"
+    }
+  };
+}
+
+const previewOnboardingPlan = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const user = buildPreviewUser(payload);
+  const targets = calculateTargets(user);
+  const fallback = buildPlanPreview({ payload, user, targets });
+  const preview = await personalizePlanPreview({ payload, user, fallback });
+
+  res.json(
+    new ApiResponse("Onboarding plan preview", preview)
+  );
 });
 
 const getCurrentPlan = asyncHandler(async (req, res) => {
@@ -405,6 +539,7 @@ const listWorkoutLibrary = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  previewOnboardingPlan,
   generatePlan,
   getCurrentPlan,
   regeneratePlan,

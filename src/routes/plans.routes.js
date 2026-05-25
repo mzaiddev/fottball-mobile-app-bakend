@@ -3,6 +3,18 @@ const controller = require("../controllers/plan.controller");
 const { protect } = require("../middlewares/auth.middleware");
 const { validateBody } = require("../middlewares/validate");
 
+router.post("/onboarding-preview", validateBody({
+  name: { type: "string", max: 120 },
+  position: { type: "string", max: 40 },
+  weightGoal: { type: "string", max: 80 },
+  goalTimeline: { type: "string", max: 120 },
+  improve: { type: "string", max: 120 },
+  holdback: { type: "string", max: 120 },
+  goals: { type: "array" },
+  constraints: { type: "object" },
+  answers: { type: "object" }
+}), controller.previewOnboardingPlan);
+
 router.use(protect);
 router.post("/generate", validateBody({
   weekStart: { type: "string", max: 40 },

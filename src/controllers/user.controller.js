@@ -192,6 +192,8 @@ const registerPushToken = asyncHandler(async (req, res) => {
 const getReferralStats = asyncHandler(async (req, res) => {
   const referrals = await Referral.find({ referrer: req.user._id }).populate("referredUser", "fullName email");
   const stats = {
+    referralCode: req.user.referralCode,
+    referralCodeEntered: req.user.onboarding?.referralCodeEntered || "",
     totalReferred: referrals.length,
     pending: referrals.filter((item) => item.status === "pending").length,
     active: referrals.filter((item) => ["trial_started", "active", "rewarded"].includes(item.status)).length,

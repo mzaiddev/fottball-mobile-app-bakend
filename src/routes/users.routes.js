@@ -7,7 +7,7 @@ router.use(protect);
 router.get("/dashboard", controller.getDashboard);
 router.patch("/onboarding", validateBody({
   completed: { type: "boolean" },
-  currentStep: { type: "string", max: 120 },
+  currentStep: { type: "number", min: 0 },
   source: { type: "string", max: 120 },
   referralCodeEntered: { type: "string", max: 40 },
   goals: { type: "array" },

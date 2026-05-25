@@ -22,10 +22,26 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: true,
+      required() {
+        return !(this.authProviders || []).length;
+      },
       minlength: 6,
       select: false
     },
+    authProviders: [
+      {
+        provider: {
+          type: String,
+          enum: ["google", "apple"],
+          required: true
+        },
+        providerUserId: {
+          type: String,
+          required: true
+        },
+        email: String
+      }
+    ],
     role: {
       type: String,
       enum: ["owner", "admin", "coach", "moderator", "support", "user"],
@@ -112,7 +128,7 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.pre("save", async function hashPassword(next) {
-  if (!this.isModified("password")) {
+  if (!this.password || !this.isModified("password")) {
     return next();
   }
   this.password = await bcrypt.hash(this.password, 10);

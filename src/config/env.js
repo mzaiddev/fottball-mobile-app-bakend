@@ -29,6 +29,16 @@ module.exports = {
   openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   openAiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS || 20000),
   openAiMaxRetries: Number(process.env.OPENAI_MAX_RETRIES || 2),
+  googleAuth: {
+    webClientId: process.env.GOOGLE_WEB_CLIENT_ID || "",
+    iosClientId: process.env.GOOGLE_IOS_CLIENT_ID || "",
+    androidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID || ""
+  },
+  appleAuth: {
+    clientId: process.env.APPLE_CLIENT_ID || "",
+    iosBundleId: process.env.IOS_BUNDLE_ID || "",
+    appBundleId: process.env.APP_BUNDLE_ID || ""
+  },
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
     apiKey: process.env.CLOUDINARY_API_KEY || "",
