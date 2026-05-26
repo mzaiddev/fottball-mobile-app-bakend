@@ -150,6 +150,86 @@ function eventNameFromStatus(status, fallback) {
   return map[status] || fallback || "manual_update";
 }
 
+function billingNotificationForStripeEvent(event, subscription) {
+  const object = event.data.object || {};
+  if (event.type === "invoice.paid" && object.billing_reason === "subscription_create") {
+    return null;
+  }
+
+  const planName = subscription.planName || "ProjectBaller Pro";
+  const periodEnd = subscription.currentPeriodEnd
+    ? dayjs(subscription.currentPeriodEnd).format("MMM D, YYYY")
+    : "";
+  const messages = {
+    "checkout.session.completed": {
+      title: "Subscription activated",
+      body: `${planName} is active on your account.${periodEnd ? ` Your current period runs until ${periodEnd}.` : ""}`
+    },
+    "invoice.paid": {
+      title: "Subscription renewed",
+      body: `${planName} renewed successfully.${periodEnd ? ` Your next renewal is after ${periodEnd}.` : ""}`
+    },
+    "invoice.payment_failed": {
+      title: "Payment failed",
+      body: "We could not process your ProjectBaller Pro payment. Please update your billing details to keep access active."
+    },
+    "invoice.payment_action_required": {
+      title: "Payment action required",
+      body: "Stripe needs one more step to complete your ProjectBaller Pro payment."
+    },
+    "customer.subscription.deleted": {
+      title: "Subscription canceled",
+      body: periodEnd
+        ? `Your ProjectBaller Pro subscription is canceled and remains available until ${periodEnd}.`
+        : "Your ProjectBaller Pro subscription has been canceled."
+    },
+    "customer.subscription.paused": {
+      title: "Subscription paused",
+      body: "Your ProjectBaller Pro subscription has been paused."
+    },
+    "customer.subscription.resumed": {
+      title: "Subscription resumed",
+      body: `${planName} is active again on your account.`
+    }
+  };
+
+  return messages[event.type] || null;
+}
+
+async function notifyStripeBillingEvent(event, subscription) {
+  const message = billingNotificationForStripeEvent(event, subscription);
+  if (!message || !subscription?.user) return;
+
+  const stripeEventId = event.id || "";
+  const alreadySent = stripeEventId
+    ? await Notification.exists({
+        user: subscription.user,
+        type: "billing",
+        "data.stripeEventId": stripeEventId
+      })
+    : null;
+
+  if (alreadySent) return;
+
+  await notifyUser(
+    subscription.user,
+    "billing",
+    message.title,
+    message.body,
+    {
+      provider: "stripe",
+      stripeEventId,
+      stripeEventType: event.type,
+      subscriptionId: subscription._id.toString(),
+      externalSubscriptionId: subscription.externalSubscriptionId,
+      status: subscription.status,
+      planName: subscription.planName,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      route: "/(tabs)/more"
+    }
+  );
+}
+
 async function createFreeTrialSubscription(userId, trialDays = 7) {
   const now = new Date();
   const trialEndsAt = dayjs(now).add(trialDays, "day").toDate();
@@ -316,6 +396,10 @@ async function upsertStripeSubscription(event) {
       externalCustomerId,
       externalSubscriptionId: subscriptionId,
       metadata: updates.metadata
+    });
+
+    await notifyStripeBillingEvent(event, subscription).catch((error) => {
+      console.error("Stripe billing notification failed:", error.message);
     });
   }
 
