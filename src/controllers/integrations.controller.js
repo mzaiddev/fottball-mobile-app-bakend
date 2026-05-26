@@ -39,7 +39,6 @@ const createSubscriptionCheckout = asyncHandler(async (req, res) => {
     customerEmail: req.user.email,
     userId: req.user._id.toString(),
     plan: req.body.plan || "yearly",
-    priceId: req.body.priceId,
     successUrl: req.body.successUrl || `${env.clientUrl}/billing/success`,
     cancelUrl: req.body.cancelUrl || `${env.clientUrl}/billing/cancel`
   });

@@ -779,7 +779,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"priceId\": \"price_test\",\n  \"successUrl\": \"http://localhost:3000/success\",\n  \"cancelUrl\": \"http://localhost:3000/cancel\"\n}"
+              "raw": "{\n  \"plan\": \"yearly\",\n  \"successUrl\": \"http://localhost:3000/success\",\n  \"cancelUrl\": \"http://localhost:3000/cancel\"\n}"
             },
             "url": "{{baseUrl}}/integrations/checkout"
           }

@@ -275,7 +275,7 @@ async function upsertStripeSubscription(event) {
     ...(userId ? { user: userId } : {}),
     provider: "stripe",
     status,
-    planId: metadata.priceId || price?.id || object.plan?.id || subscriptionId,
+    planId: metadata.plan || price?.id || object.plan?.id || subscriptionId,
     planName: planNameFromStripe({ metadata, price }),
     amount,
     currency,

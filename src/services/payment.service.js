@@ -3,29 +3,41 @@ const env = require("../config/env");
 
 const stripe = env.stripeSecretKey ? new Stripe(env.stripeSecretKey) : null;
 
-const PRICE_IDS = {
-  yearly: env.stripeYearlyPriceId,
-  monthly: env.stripeMonthlyPriceId
+const SUBSCRIPTION_PLANS = {
+  monthly: {
+    amount: 999,
+    currency: "usd",
+    interval: "month",
+    name: "Project Baller Monthly",
+    description: "ProjectBaller Pro monthly subscription"
+  },
+  yearly: {
+    amount: 9900,
+    currency: "usd",
+    interval: "year",
+    name: "Project Baller Yearly",
+    description: "ProjectBaller Pro yearly subscription"
+  }
 };
 
-async function createCheckoutSession({ customerEmail, userId, plan = "yearly", priceId, successUrl, cancelUrl, trialDays = 0 }) {
-  const resolvedPriceId = priceId || PRICE_IDS[plan];
+function getPlanConfig(plan) {
+  return SUBSCRIPTION_PLANS[plan] || SUBSCRIPTION_PLANS.yearly;
+}
+
+async function createCheckoutSession({ customerEmail, userId, plan = "yearly", successUrl, cancelUrl, trialDays = 0 }) {
+  const planConfig = getPlanConfig(plan);
   if (!stripe) {
     return {
       mocked: true,
       url: successUrl || `${env.appBaseUrl}/mock-checkout`
     };
   }
-  if (!resolvedPriceId) {
-    throw new Error(`Stripe price id is not configured for the ${plan} plan`);
-  }
 
   const subscriptionData = {
     metadata: {
       userId,
-      priceId: resolvedPriceId,
       plan,
-      planName: plan === "monthly" ? "Project Baller Monthly" : "Project Baller Yearly"
+      planName: planConfig.name
     }
   };
 
@@ -38,12 +50,29 @@ async function createCheckoutSession({ customerEmail, userId, plan = "yearly", p
     client_reference_id: userId,
     payment_method_types: ["card"],
     mode: "subscription",
-    line_items: [{ price: resolvedPriceId, quantity: 1 }],
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: planConfig.currency,
+          unit_amount: planConfig.amount,
+          product_data: {
+            name: planConfig.name,
+            description: planConfig.description,
+            metadata: {
+              plan
+            }
+          },
+          recurring: {
+            interval: planConfig.interval
+          }
+        }
+      }
+    ],
     metadata: {
       userId,
-      priceId: resolvedPriceId,
       plan,
-      planName: plan === "monthly" ? "Project Baller Monthly" : "Project Baller Yearly"
+      planName: planConfig.name
     },
     subscription_data: subscriptionData,
     success_url: successUrl,
