@@ -1,9 +1,10 @@
 const router = require("express").Router();
 const controller = require("../controllers/match.controller");
-const { protect } = require("../middlewares/auth.middleware");
+const { protect, requireActiveEntitlement } = require("../middlewares/auth.middleware");
 const { validateBody } = require("../middlewares/validate");
 
 router.use(protect);
+router.use(requireActiveEntitlement);
 router.post("/", validateBody({
   opponent: { type: "string", required: true, min: 2, max: 120 },
   dateTime: { type: "string", required: true, max: 60 },

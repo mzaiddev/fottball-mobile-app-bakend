@@ -3,30 +3,49 @@ const env = require("../config/env");
 
 const stripe = env.stripeSecretKey ? new Stripe(env.stripeSecretKey) : null;
 
-async function createCheckoutSession({ customerEmail, priceId, successUrl, cancelUrl, trialDays = 7 }) {
+const PRICE_IDS = {
+  yearly: env.stripeYearlyPriceId,
+  monthly: env.stripeMonthlyPriceId
+};
+
+async function createCheckoutSession({ customerEmail, userId, plan = "yearly", priceId, successUrl, cancelUrl, trialDays = 0 }) {
+  const resolvedPriceId = priceId || PRICE_IDS[plan];
   if (!stripe) {
     return {
       mocked: true,
-      url: `${env.appBaseUrl}/mock-checkout`
+      url: successUrl || `${env.appBaseUrl}/mock-checkout`
     };
+  }
+  if (!resolvedPriceId) {
+    throw new Error(`Stripe price id is not configured for the ${plan} plan`);
+  }
+
+  const subscriptionData = {
+    metadata: {
+      userId,
+      priceId: resolvedPriceId,
+      plan,
+      planName: plan === "monthly" ? "Project Baller Monthly" : "Project Baller Yearly"
+    }
+  };
+
+  if (trialDays > 0) {
+    subscriptionData.trial_period_days = trialDays;
   }
 
   const session = await stripe.checkout.sessions.create({
     customer_email: customerEmail,
+    client_reference_id: userId,
     payment_method_types: ["card"],
     mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: [{ price: resolvedPriceId, quantity: 1 }],
     metadata: {
-      priceId,
-      planName: "Project Baller Plan"
+      userId,
+      priceId: resolvedPriceId,
+      plan,
+      planName: plan === "monthly" ? "Project Baller Monthly" : "Project Baller Yearly"
     },
-    subscription_data: {
-      trial_period_days: trialDays,
-      metadata: {
-        priceId,
-        planName: "Project Baller Plan"
-      }
-    },
+    subscription_data: subscriptionData,
     success_url: successUrl,
     cancel_url: cancelUrl
   });
@@ -34,4 +53,22 @@ async function createCheckoutSession({ customerEmail, priceId, successUrl, cance
   return session;
 }
 
-module.exports = { stripe, createCheckoutSession };
+async function createBillingPortalSession({ customerId, returnUrl }) {
+  if (!stripe) {
+    return {
+      mocked: true,
+      url: returnUrl || env.clientUrl || env.appBaseUrl
+    };
+  }
+
+  if (!customerId) {
+    throw new Error("Stripe customer id is required");
+  }
+
+  return stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: returnUrl || env.clientUrl || env.appBaseUrl
+  });
+}
+
+module.exports = { stripe, createBillingPortalSession, createCheckoutSession };

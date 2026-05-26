@@ -1,7 +1,10 @@
 const dayjs = require("dayjs");
+const Notification = require("../models/Notification");
 const Subscription = require("../models/Subscription");
 const User = require("../models/User");
 const { trackRevenueEvent } = require("./analytics.service");
+const { notifyUser } = require("./notification.service");
+const { stripe } = require("./payment.service");
 
 const REVENUECAT_STATUS = {
   INITIAL_PURCHASE: "active",
@@ -23,6 +26,117 @@ function centsToAmount(value) {
   return Number.isFinite(number) ? Number((number / 100).toFixed(2)) : undefined;
 }
 
+function compactObject(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function stripeDate(seconds) {
+  return seconds ? new Date(seconds * 1000) : undefined;
+}
+
+function getStringId(value) {
+  if (!value) return undefined;
+  return typeof value === "string" ? value : value.id || value._id?.toString();
+}
+
+function getStripeSubscriptionId(object = {}) {
+  return (
+    getStringId(object.subscription) ||
+    getStringId(object.parent?.subscription_details?.subscription) ||
+    getStringId(object.subscription_details?.subscription) ||
+    getStringId(object.lines?.data?.[0]?.subscription) ||
+    getStringId(object.lines?.data?.[0]?.parent?.subscription_item_details?.subscription) ||
+    (object.object === "subscription" ? object.id : undefined)
+  );
+}
+
+function getStripeCustomerId(object = {}, subscriptionObject = {}) {
+  return getStringId(object.customer) || getStringId(subscriptionObject.customer);
+}
+
+function getStripePrice(object = {}, subscriptionObject = {}) {
+  return (
+    subscriptionObject.items?.data?.[0]?.price ||
+    object.items?.data?.[0]?.price ||
+    object.lines?.data?.[0]?.price ||
+    object.plan ||
+    object.price
+  );
+}
+
+function getStripeMetadata(object = {}, subscriptionObject = {}) {
+  return {
+    ...(subscriptionObject.metadata || {}),
+    ...(object.subscription_details?.metadata || {}),
+    ...(object.metadata || {})
+  };
+}
+
+function normalizeStripeStatus(status) {
+  const normalized = String(status || "").toLowerCase();
+  const map = {
+    active: "active",
+    trialing: "trialing",
+    canceled: "canceled",
+    past_due: "past_due",
+    unpaid: "past_due",
+    incomplete: "past_due",
+    incomplete_expired: "expired",
+    paused: "inactive"
+  };
+  return map[normalized];
+}
+
+function statusFromStripeEvent(event, subscriptionObject) {
+  const object = event.data.object || {};
+  if (event.type === "checkout.session.completed") {
+    return normalizeStripeStatus(subscriptionObject?.status) ||
+      (object.payment_status === "no_payment_required" ? "trialing" : object.payment_status === "paid" ? "active" : "past_due");
+  }
+  if (event.type === "customer.subscription.deleted") return "canceled";
+  if (event.type === "customer.subscription.paused") return "inactive";
+  if (event.type === "customer.subscription.resumed") return normalizeStripeStatus(subscriptionObject?.status) || "active";
+  if (event.type === "customer.subscription.trial_will_end") return "trialing";
+  if (event.type === "invoice.payment_failed" || event.type === "invoice.payment_action_required") return "past_due";
+  if (event.type === "invoice.paid") return normalizeStripeStatus(subscriptionObject?.status) || "active";
+  if (event.type === "charge.refunded") return "refunded";
+  return normalizeStripeStatus(object.status) || normalizeStripeStatus(subscriptionObject?.status) || "active";
+}
+
+function planNameFromStripe({ metadata, price }) {
+  if (metadata.planName) return metadata.planName;
+  if (metadata.plan === "monthly" || price?.recurring?.interval === "month") return "Project Baller Monthly";
+  if (metadata.plan === "yearly" || price?.recurring?.interval === "year") return "Project Baller Yearly";
+  return "Project Baller Plan";
+}
+
+async function retrieveStripeSubscription(subscriptionId) {
+  if (!stripe || !subscriptionId) return null;
+  try {
+    return await stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ["items.data.price"]
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function retrieveSubscriptionForStripeEvent(object, subscriptionId) {
+  if (object.object === "subscription") return object;
+  let resolvedSubscriptionId = subscriptionId;
+
+  if (!resolvedSubscriptionId && object.invoice && stripe) {
+    try {
+      const invoice = await stripe.invoices.retrieve(getStringId(object.invoice));
+      resolvedSubscriptionId = getStripeSubscriptionId(invoice);
+    } catch {
+      resolvedSubscriptionId = undefined;
+    }
+  }
+
+  return retrieveStripeSubscription(resolvedSubscriptionId);
+}
+
 function eventNameFromStatus(status, fallback) {
   const map = {
     active: fallback || "renewed",
@@ -30,9 +144,47 @@ function eventNameFromStatus(status, fallback) {
     canceled: "canceled",
     expired: "expired",
     refunded: "refunded",
-    past_due: "past_due"
+    past_due: "past_due",
+    inactive: "manual_update"
   };
   return map[status] || fallback || "manual_update";
+}
+
+async function createFreeTrialSubscription(userId, trialDays = 7) {
+  const now = new Date();
+  const trialEndsAt = dayjs(now).add(trialDays, "day").toDate();
+  const existing = await Subscription.findOne({
+    user: userId,
+    status: { $in: ["trialing", "active"] }
+  });
+
+  if (existing) return existing;
+
+  const subscription = await Subscription.create({
+    user: userId,
+    provider: "manual",
+    status: "trialing",
+    planId: "free-trial",
+    planName: "Project Baller Free Trial",
+    trialEndsAt,
+    startedAt: now,
+    entitlements: ["pro"],
+    metadata: {
+      source: "registration",
+      trialDays
+    }
+  });
+
+  await trackRevenueEvent({
+    user: userId,
+    subscription: subscription._id,
+    provider: "manual",
+    type: "trial_started",
+    status: "trialing",
+    metadata: { source: "registration", trialDays }
+  });
+
+  return subscription;
 }
 
 async function upsertRevenueCatSubscription(event = {}) {
@@ -83,45 +235,73 @@ async function upsertRevenueCatSubscription(event = {}) {
 }
 
 async function upsertStripeSubscription(event) {
-  const object = event.data.object;
-  const customerEmail = object.customer_email || object.customer_details?.email;
-  const user = customerEmail ? await User.findOne({ email: customerEmail }) : null;
-  const subscriptionId = object.subscription || object.id;
-  const statusByEvent = {
-    "checkout.session.completed": object.mode === "subscription" ? "trialing" : "active",
-    "customer.subscription.created": object.status === "trialing" ? "trialing" : "active",
-    "customer.subscription.updated": object.status === "past_due" ? "past_due" : object.status === "canceled" ? "canceled" : "active",
-    "customer.subscription.deleted": "canceled",
-    "invoice.payment_failed": "past_due",
-    "invoice.paid": "active",
-    "charge.refunded": "refunded"
-  };
-  const status = statusByEvent[event.type] || "active";
+  const object = event.data.object || {};
+  const initialSubscriptionId = getStripeSubscriptionId(object);
+  const subscriptionObject = await retrieveSubscriptionForStripeEvent(object, initialSubscriptionId);
+  const subscriptionId = initialSubscriptionId || subscriptionObject?.id;
+  const existing = subscriptionId
+    ? await Subscription.findOne({ provider: "stripe", externalSubscriptionId: subscriptionId }).lean()
+    : null;
+  const metadata = getStripeMetadata(object, subscriptionObject || {});
+  const customerEmail = object.customer_email || object.customer_details?.email || object.customer_email || object.receipt_email;
+  const metadataUserId = metadata.userId || object.client_reference_id;
+  const user = metadataUserId
+    ? await User.findById(metadataUserId)
+    : existing?.user
+      ? await User.findById(existing.user)
+      : customerEmail
+        ? await User.findOne({ email: customerEmail })
+        : null;
+  const userId = user?._id || existing?.user;
+  const status = statusFromStripeEvent(event, subscriptionObject);
+  const price = getStripePrice(object, subscriptionObject || {});
+  const linePeriod = object.lines?.data?.[0]?.period || {};
+  const currentPeriodEnd = stripeDate(subscriptionObject?.current_period_end || object.current_period_end || linePeriod.end);
+  const trialEndsAt = stripeDate(subscriptionObject?.trial_end || object.trial_end);
+  const canceledAt = stripeDate(subscriptionObject?.canceled_at || object.canceled_at);
+  const amount = centsToAmount(
+    object.amount_total ??
+    object.amount_paid ??
+    object.amount_due ??
+    object.amount_refunded ??
+    price?.unit_amount
+  );
+  const currency = (object.currency || price?.currency || "usd").toLowerCase();
+  const externalCustomerId = getStripeCustomerId(object, subscriptionObject || {});
 
-  if (!user && !subscriptionId) return null;
+  if (!userId && !subscriptionId) return null;
+
+  const updates = compactObject({
+    ...(userId ? { user: userId } : {}),
+    provider: "stripe",
+    status,
+    planId: metadata.priceId || price?.id || object.plan?.id || subscriptionId,
+    planName: planNameFromStripe({ metadata, price }),
+    amount,
+    currency,
+    trialEndsAt,
+    currentPeriodEnd,
+    startedAt: stripeDate(subscriptionObject?.current_period_start || object.current_period_start || object.created),
+    canceledAt: status === "canceled" ? (canceledAt || new Date()) : canceledAt,
+    expiredAt: status === "expired" || status === "refunded" ? new Date() : undefined,
+    lastRenewedAt: event.type === "invoice.paid" && status === "active" ? new Date() : undefined,
+    externalCustomerId,
+    externalSubscriptionId: subscriptionId,
+    entitlements: ["active", "trialing"].includes(status) ? ["pro"] : [],
+    metadata: {
+      eventId: event.id,
+      eventType: event.type,
+      object,
+      subscription: subscriptionObject || undefined
+    }
+  });
 
   const subscription = await Subscription.findOneAndUpdate(
-    { provider: "stripe", externalSubscriptionId: subscriptionId },
-    {
-      $set: {
-        ...(user ? { user: user._id } : {}),
-        provider: "stripe",
-        status,
-        planId: object.metadata?.priceId || object.plan?.id || object.lines?.data?.[0]?.price?.id || subscriptionId,
-        planName: object.metadata?.planName || "Project Baller Plan",
-        amount: centsToAmount(object.amount_total ?? object.amount_paid ?? object.amount_refunded),
-        currency: (object.currency || "usd").toLowerCase(),
-        trialEndsAt: object.trial_end ? new Date(object.trial_end * 1000) : undefined,
-        currentPeriodEnd: object.current_period_end ? new Date(object.current_period_end * 1000) : undefined,
-        externalCustomerId: object.customer,
-        externalSubscriptionId: subscriptionId,
-        metadata: object,
-        ...(status === "canceled" ? { canceledAt: new Date() } : {}),
-        ...(status === "refunded" ? { expiredAt: new Date() } : {}),
-        ...(event.type === "invoice.paid" ? { lastRenewedAt: new Date() } : {})
-      }
-    },
-    { upsert: Boolean(user), new: true, setDefaultsOnInsert: true }
+    subscriptionId
+      ? { provider: "stripe", externalSubscriptionId: subscriptionId }
+      : { provider: "stripe", user: userId },
+    { $set: updates },
+    { upsert: Boolean(userId), new: true, setDefaultsOnInsert: true }
   );
 
   if (subscription) {
@@ -130,12 +310,12 @@ async function upsertStripeSubscription(event) {
       subscription: subscription._id,
       provider: "stripe",
       type: event.type === "checkout.session.completed" ? "checkout_completed" : eventNameFromStatus(status, "renewed"),
-      amount: centsToAmount(object.amount_total ?? object.amount_paid ?? object.amount_refunded),
-      currency: (object.currency || "usd").toLowerCase(),
+      amount,
+      currency,
       status,
-      externalCustomerId: object.customer,
+      externalCustomerId,
       externalSubscriptionId: subscriptionId,
-      metadata: object
+      metadata: updates.metadata
     });
   }
 
@@ -165,7 +345,7 @@ async function syncExpiredSubscriptions() {
   const now = new Date();
   const result = await Subscription.updateMany(
     {
-      status: { $in: ["trialing", "active", "past_due"] },
+      status: { $in: ["trialing", "active", "canceled", "past_due"] },
       currentPeriodEnd: { $lt: now }
     },
     { $set: { status: "expired", expiredAt: now } }
@@ -174,7 +354,7 @@ async function syncExpiredSubscriptions() {
   const staleTrials = await Subscription.updateMany(
     {
       status: "trialing",
-      trialEndsAt: { $lt: dayjs().subtract(1, "day").toDate() }
+      trialEndsAt: { $lte: now }
     },
     { $set: { status: "expired", expiredAt: now } }
   );
@@ -182,17 +362,67 @@ async function syncExpiredSubscriptions() {
   return { expired: result.modifiedCount || 0, trials: staleTrials.modifiedCount || 0 };
 }
 
+async function sendTrialExpiryReminders() {
+  const now = new Date();
+  const reminderCutoff = dayjs(now).add(2, "day").toDate();
+  const trials = await Subscription.find({
+    status: "trialing",
+    trialEndsAt: { $gt: now, $lte: reminderCutoff }
+  }).select("user trialEndsAt").lean();
+
+  let sent = 0;
+  for (const trial of trials) {
+    const alreadySent = await Notification.exists({
+      user: trial.user,
+      type: "trial_expiring",
+      "data.subscriptionId": trial._id.toString()
+    });
+    if (alreadySent) continue;
+
+    const daysLeft = Math.max(1, Math.ceil((new Date(trial.trialEndsAt).getTime() - Date.now()) / 86400000));
+    await notifyUser(
+      trial.user,
+      "trial_expiring",
+      "Your free trial ends soon",
+      `Your ProjectBaller trial ends in ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Keep your plan active by continuing with Pro.`,
+      {
+        subscriptionId: trial._id.toString(),
+        trialEndsAt: trial.trialEndsAt,
+        route: "/onboarding/undroppable"
+      }
+    );
+    sent += 1;
+  }
+
+  return { sent };
+}
+
 async function hasActiveEntitlement(userId) {
+  const now = new Date();
   const subscription = await Subscription.findOne({
     user: userId,
-    status: { $in: ["trialing", "active"] },
-    $or: [{ currentPeriodEnd: { $exists: false } }, { currentPeriodEnd: null }, { currentPeriodEnd: { $gte: new Date() } }]
+    $or: [
+      {
+        status: "active",
+        $or: [{ currentPeriodEnd: { $exists: false } }, { currentPeriodEnd: null }, { currentPeriodEnd: { $gte: now } }]
+      },
+      {
+        status: "canceled",
+        currentPeriodEnd: { $gte: now }
+      },
+      {
+        status: "trialing",
+        trialEndsAt: { $gte: now }
+      }
+    ]
   }).lean();
   return Boolean(subscription);
 }
 
 module.exports = {
+  createFreeTrialSubscription,
   hasActiveEntitlement,
+  sendTrialExpiryReminders,
   syncExpiredSubscriptions,
   updateManualSubscription,
   upsertRevenueCatSubscription,

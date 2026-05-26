@@ -5,6 +5,7 @@ const User = require("../models/User");
 const ApiError = require("../utils/ApiError");
 const asyncHandler = require("../utils/asyncHandler");
 const { hasPermission } = require("../services/adminRules.service");
+const { hasActiveEntitlement } = require("../services/billing.service");
 
 const protect = asyncHandler(async (req, res, next) => {
   const header = req.headers.authorization || "";
@@ -43,4 +44,12 @@ function requirePermission(permission) {
   };
 }
 
-module.exports = { protect, authorize, requirePermission };
+const requireActiveEntitlement = asyncHandler(async (req, res, next) => {
+  const entitled = await hasActiveEntitlement(req.user._id);
+  if (!entitled) {
+    throw new ApiError(StatusCodes.PAYMENT_REQUIRED, "Your free trial has ended. Upgrade to Pro to continue.");
+  }
+  next();
+});
+
+module.exports = { protect, authorize, requirePermission, requireActiveEntitlement };

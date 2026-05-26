@@ -1,5 +1,6 @@
 const dayjs = require("dayjs");
 const { StatusCodes } = require("http-status-codes");
+const { v4: uuid } = require("uuid");
 const Match = require("../models/Match");
 const Notification = require("../models/Notification");
 const NutritionLog = require("../models/NutritionLog");
@@ -149,6 +150,11 @@ const listNotifications = asyncHandler(async (req, res) => {
   res.json(new ApiResponse("Notifications", items));
 });
 
+const getNotificationUnreadCount = asyncHandler(async (req, res) => {
+  const unreadCount = await Notification.countDocuments({ user: req.user._id, isRead: false });
+  res.json(new ApiResponse("Unread notifications", { unreadCount }));
+});
+
 const markNotificationRead = asyncHandler(async (req, res) => {
   const item = await Notification.findOneAndUpdate(
     { _id: req.params.id, user: req.user._id },
@@ -159,6 +165,20 @@ const markNotificationRead = asyncHandler(async (req, res) => {
     throw new ApiError(StatusCodes.NOT_FOUND, "Notification not found");
   }
   res.json(new ApiResponse("Notification updated", item));
+});
+
+const markAllNotificationsRead = asyncHandler(async (req, res) => {
+  const result = await Notification.updateMany(
+    { user: req.user._id, isRead: false },
+    { $set: { isRead: true } }
+  );
+  const items = await Notification.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(50);
+  res.json(
+    new ApiResponse("Notifications marked read", {
+      modifiedCount: result.modifiedCount || 0,
+      notifications: items
+    })
+  );
 });
 
 const createSupportTicket = asyncHandler(async (req, res) => {
@@ -190,9 +210,18 @@ const registerPushToken = asyncHandler(async (req, res) => {
 });
 
 const getReferralStats = asyncHandler(async (req, res) => {
-  const referrals = await Referral.find({ referrer: req.user._id }).populate("referredUser", "fullName email");
+  let referralCode = req.user.referralCode;
+  if (!referralCode) {
+    referralCode = `BALLER-${uuid().slice(0, 8).toUpperCase()}`;
+    await User.findByIdAndUpdate(req.user._id, { referralCode });
+  }
+
+  const referrals = await Referral.find({ referrer: req.user._id })
+    .populate("referredUser", "fullName email")
+    .sort({ createdAt: -1 })
+    .lean();
   const stats = {
-    referralCode: req.user.referralCode,
+    referralCode,
     referralCodeEntered: req.user.onboarding?.referralCodeEntered || "",
     totalReferred: referrals.length,
     pending: referrals.filter((item) => item.status === "pending").length,
@@ -210,7 +239,9 @@ module.exports = {
   connectWearable,
   getDashboard,
   listNotifications,
+  getNotificationUnreadCount,
   markNotificationRead,
+  markAllNotificationsRead,
   createSupportTicket,
   registerPushToken,
   getReferralStats

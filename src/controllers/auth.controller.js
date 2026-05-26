@@ -8,6 +8,7 @@ const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { signAccessToken, signRefreshToken } = require("../utils/tokens");
 const { getRolePermissions } = require("../services/adminRules.service");
+const { createFreeTrialSubscription } = require("../services/billing.service");
 const env = require("../config/env");
 
 const googleClient = new OAuth2Client();
@@ -55,9 +56,11 @@ const register = asyncHandler(async (req, res) => {
     await Referral.create({
       referrer: referrer._id,
       referredUser: user._id,
-      code: normalizedReferralCode
+      code: normalizedReferralCode,
+      status: "trial_started"
     });
   }
+  await createFreeTrialSubscription(user._id);
 
   res.status(StatusCodes.CREATED).json(
     new ApiResponse("Account created", {
@@ -191,9 +194,11 @@ const socialAuth = asyncHandler(async (req, res) => {
       await Referral.create({
         referrer: referrer._id,
         referredUser: user._id,
-        code: normalizedReferralCode
+        code: normalizedReferralCode,
+        status: "trial_started"
       });
     }
+    await createFreeTrialSubscription(user._id);
   } else {
     const hasProvider = (user.authProviders || []).some(
       (item) => item.provider === provider && item.providerUserId === identity.providerUserId

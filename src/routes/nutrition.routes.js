@@ -1,9 +1,10 @@
 const router = require("express").Router();
 const controller = require("../controllers/nutrition.controller");
-const { protect } = require("../middlewares/auth.middleware");
+const { protect, requireActiveEntitlement } = require("../middlewares/auth.middleware");
 const { validateBody } = require("../middlewares/validate");
 
 router.use(protect);
+router.use(requireActiveEntitlement);
 router.get("/today", controller.getTodayLog);
 router.post("/meals", validateBody({
   name: { type: "string", required: true, max: 160 },

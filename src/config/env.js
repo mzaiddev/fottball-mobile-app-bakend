@@ -46,7 +46,10 @@ module.exports = {
   },
   stripeSecretKey: process.env.STRIPE_SECRET_KEY || "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
+  stripeYearlyPriceId: process.env.STRIPE_YEARLY_PRICE_ID || "",
+  stripeMonthlyPriceId: process.env.STRIPE_MONTHLY_PRICE_ID || "",
   revenueCatWebhookSecret: process.env.REVENUECAT_WEBHOOK_SECRET || "",
+  cronSecret: process.env.CRON_SECRET || "",
   appBaseUrl: process.env.APP_BASE_URL || "http://localhost:5000",
   defaultAdmin: {
     name: process.env.DEFAULT_ADMIN_NAME || "",

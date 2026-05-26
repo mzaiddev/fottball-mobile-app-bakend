@@ -8,5 +8,6 @@ router.use("/matches", require("./matches.routes"));
 router.use("/community", require("./community.routes"));
 router.use("/admin", require("./admin.routes"));
 router.use("/integrations", require("./integrations.routes"));
+router.use("/cron", require("./cron.routes"));
 
 module.exports = router;

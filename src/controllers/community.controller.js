@@ -66,7 +66,16 @@ const createPost = asyncHandler(async (req, res) => {
 });
 
 const listPosts = asyncHandler(async (req, res) => {
-  const posts = await CommunityPost.find()
+  const q = String(req.query.q || "").trim();
+  const filter = q
+    ? {
+        $or: [
+          { text: { $regex: q, $options: "i" } },
+          { programGroup: { $regex: q, $options: "i" } }
+        ]
+      }
+    : {};
+  const posts = await CommunityPost.find(filter)
     .populate("author", "fullName profilePhotoUrl playerTier")
     .populate("comments.user", "fullName profilePhotoUrl playerTier")
     .sort({ createdAt: -1 });

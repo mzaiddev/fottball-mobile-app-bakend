@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const controller = require("../controllers/plan.controller");
-const { protect } = require("../middlewares/auth.middleware");
+const { protect, requireActiveEntitlement } = require("../middlewares/auth.middleware");
 const { validateBody } = require("../middlewares/validate");
 
 router.post("/onboarding-preview", validateBody({
@@ -16,6 +16,7 @@ router.post("/onboarding-preview", validateBody({
 }), controller.previewOnboardingPlan);
 
 router.use(protect);
+router.use(requireActiveEntitlement);
 router.post("/generate", validateBody({
   weekStart: { type: "string", max: 40 },
   matchDays: { type: "array", max: 7 },

@@ -33,6 +33,8 @@ router.post("/push-token", validateBody({
 }), controller.registerPushToken);
 router.get("/referrals", controller.getReferralStats);
 router.get("/notifications", controller.listNotifications);
+router.get("/notifications/unread-count", controller.getNotificationUnreadCount);
+router.patch("/notifications/read-all", controller.markAllNotificationsRead);
 router.patch("/notifications/:id/read", controller.markNotificationRead);
 router.post("/support-tickets", validateBody({
   subject: { type: "string", required: true, min: 3, max: 180 },
