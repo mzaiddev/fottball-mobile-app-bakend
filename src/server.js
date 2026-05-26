@@ -27,7 +27,7 @@ async function start() {
     }
   });
 
-  cron.schedule("0 4 * * *", async () => {
+  cron.schedule("*/15 * * * *", async () => {
     await sendTrialExpiryReminders();
     await syncExpiredSubscriptions();
   });

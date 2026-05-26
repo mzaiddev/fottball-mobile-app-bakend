@@ -28,11 +28,5 @@
       "source": "/(.*)",
       "destination": "/api/index.js"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/subscriptions",
-      "schedule": "*/15 * * * *"
-    }
   ]
 }
