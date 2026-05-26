@@ -5,7 +5,10 @@ const env = require("./config/env");
 const { connectDb } = require("./config/db");
 const User = require("./models/User");
 const { bootstrapDefaults } = require("./services/bootstrap.service");
-const { sendTrialExpiryReminders, syncExpiredSubscriptions } = require("./services/billing.service");
+const {
+  sendTrialExpiryReminders,
+  syncExpiredSubscriptions,
+} = require("./services/billing.service");
 const { calculateReadiness } = require("./services/readiness.service");
 const { initializeSocket } = require("./sockets");
 
@@ -24,7 +27,7 @@ async function start() {
     }
   });
 
-  cron.schedule("*/15 * * * *", async () => {
+  cron.schedule("0 4 * * *", async () => {
     await sendTrialExpiryReminders();
     await syncExpiredSubscriptions();
   });
