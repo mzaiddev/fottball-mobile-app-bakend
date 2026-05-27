@@ -5,6 +5,7 @@ const { validateBody } = require("../middlewares/validate");
 
 const router = express.Router();
 
+router.get("/checkout/redirect", controller.checkoutRedirect);
 router.post("/checkout", protect, validateBody({
   plan: { type: "string", enum: ["yearly", "monthly"] },
   successUrl: { type: "string", max: 500 },

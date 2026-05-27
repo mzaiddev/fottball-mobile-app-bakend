@@ -49,6 +49,7 @@ module.exports = {
   revenueCatWebhookSecret: process.env.REVENUECAT_WEBHOOK_SECRET || "",
   cronSecret: process.env.CRON_SECRET || "",
   appBaseUrl: process.env.APP_BASE_URL || "http://localhost:5000",
+  appScheme: process.env.APP_SCHEME || "projectballer",
   defaultAdmin: {
     name: process.env.DEFAULT_ADMIN_NAME || "",
     email: process.env.DEFAULT_ADMIN_EMAIL || "",

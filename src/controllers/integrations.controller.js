@@ -13,6 +13,80 @@ const { upsertRevenueCatSubscription, upsertStripeSubscription } = require("../s
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+function isHttpUrl(value) {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function requestBaseUrl(req) {
+  const forwardedHost = req.headers["x-forwarded-host"];
+  const host = Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost || req.get("host");
+  if (!host) return env.appBaseUrl;
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const proto = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto || req.protocol || "https";
+  return `${proto}://${host}`;
+}
+
+function absoluteBackendUrl(req, path) {
+  return new URL(path, requestBaseUrl(req)).toString();
+}
+
+function checkoutRedirectUrl(req, status) {
+  const url = new URL("/api/integrations/checkout/redirect", requestBaseUrl(req));
+  url.searchParams.set("status", status);
+  if (status === "success") {
+    url.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
+  }
+  return url.toString();
+}
+
+function appDeepLinkForStatus(status) {
+  const pathByStatus = {
+    success: "/finalizing?checkout=success",
+    cancel: "/billing/plans?checkout=cancel",
+    portal: "/more"
+  };
+  const path = pathByStatus[status] || "/more";
+  return `${env.appScheme}://${path.replace(/^\//, "")}`;
+}
+
+function redirectHtml({ status, appUrl }) {
+  const title = status === "success"
+    ? "Payment complete"
+    : status === "cancel"
+      ? "Checkout canceled"
+      : "Returning to ProjectBaller";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    body{margin:0;background:#0A0E1A;color:#fff;font-family:Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px;text-align:center}
+    .box{max-width:420px}
+    a{display:inline-block;margin-top:18px;background:#e11d48;color:#fff;text-decoration:none;padding:14px 18px;border-radius:999px;font-weight:800}
+    p{color:#aab2c5;line-height:1.5}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>${title}</h1>
+    <p>You can return to ProjectBaller now. If the app does not open automatically, tap the button below.</p>
+    <a href="${appUrl}">Open ProjectBaller</a>
+  </div>
+  <script>
+    setTimeout(function(){ window.location.href = ${JSON.stringify(appUrl)}; }, 350);
+  </script>
+</body>
+</html>`;
+}
+
 function uploadToCloudinary(fileBuffer, originalName, mimeType) {
   return new Promise((resolve, reject) => {
     const publicId = `${Date.now()}-${originalName.replace(/\s+/g, "-")}`;
@@ -35,12 +109,18 @@ function uploadToCloudinary(fileBuffer, originalName, mimeType) {
 }
 
 const createSubscriptionCheckout = asyncHandler(async (req, res) => {
+  const successUrl = isHttpUrl(req.body.successUrl)
+    ? req.body.successUrl
+    : checkoutRedirectUrl(req, "success");
+  const cancelUrl = isHttpUrl(req.body.cancelUrl)
+    ? req.body.cancelUrl
+    : checkoutRedirectUrl(req, "cancel");
   const session = await createCheckoutSession({
     customerEmail: req.user.email,
     userId: req.user._id.toString(),
     plan: req.body.plan || "yearly",
-    successUrl: req.body.successUrl || `${env.clientUrl}/billing/success`,
-    cancelUrl: req.body.cancelUrl || `${env.clientUrl}/billing/cancel`
+    successUrl,
+    cancelUrl
   });
 
   res.json(new ApiResponse("Checkout session created", session));
@@ -59,10 +139,21 @@ const createSubscriptionPortal = asyncHandler(async (req, res) => {
 
   const session = await createBillingPortalSession({
     customerId: subscription.externalCustomerId,
-    returnUrl: req.body.returnUrl || env.clientUrl || env.appBaseUrl
+    returnUrl: isHttpUrl(req.body.returnUrl)
+      ? req.body.returnUrl
+      : absoluteBackendUrl(req, "/api/integrations/checkout/redirect?status=portal")
   });
 
   res.json(new ApiResponse("Billing portal session created", session));
+});
+
+const checkoutRedirect = asyncHandler(async (req, res) => {
+  const status = ["success", "cancel", "portal"].includes(String(req.query.status))
+    ? String(req.query.status)
+    : "portal";
+  const appUrl = appDeepLinkForStatus(status);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(redirectHtml({ status, appUrl }));
 });
 
 const stripeWebhook = asyncHandler(async (req, res) => {
@@ -147,6 +238,7 @@ module.exports = {
   upload,
   createSubscriptionCheckout,
   createSubscriptionPortal,
+  checkoutRedirect,
   stripeWebhook,
   revenueCatWebhook,
   cloudinaryUploadResult,
