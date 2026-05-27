@@ -9,8 +9,15 @@ const ApiResponse = require("../utils/ApiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { getWeekBounds } = require("../utils/date");
 const { calculateReadiness } = require("../services/readiness.service");
-const { calculateTargets, generateMealPlan } = require("../services/nutrition.service");
+const {
+  calculateTargets,
+  generateMealPlan,
+} = require("../services/nutrition.service");
 const { getAdminRuleSettings } = require("../services/adminRules.service");
+const {
+  ensureMonthlyTokenBudget,
+  estimateTokens,
+} = require("../services/aiUsage.service");
 const { trackEvent } = require("../services/analytics.service");
 
 async function getOrCreateTodayLog(user) {
@@ -22,7 +29,7 @@ async function getOrCreateTodayLog(user) {
       user: user._id,
       date,
       dailyTargets: calculateTargets(user, rules),
-      meals: []
+      meals: [],
     });
   }
   return log;
@@ -38,7 +45,7 @@ function recalculateTotals(log) {
       acc.hydrationMl += meal.hydrationMl || 0;
       return acc;
     },
-    { calories: 0, protein: 0, carbs: 0, fats: 0, hydrationMl: 0 }
+    { calories: 0, protein: 0, carbs: 0, fats: 0, hydrationMl: 0 },
   );
   log.totals = totals;
 }
@@ -56,9 +63,17 @@ const addMeal = asyncHandler(async (req, res) => {
 
   const readiness = await calculateReadiness(req.user);
   await User.findByIdAndUpdate(req.user._id, { readiness });
-  await trackEvent({ user: req.user._id, source: "app", type: "meal_logged", feature: "Nutrition Logging", metadata: { mealType: req.body.mealType } });
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: "meal_logged",
+    feature: "Nutrition Logging",
+    metadata: { mealType: req.body.mealType },
+  });
 
-  res.status(StatusCodes.CREATED).json(new ApiResponse("Meal logged", { log, readiness }));
+  res
+    .status(StatusCodes.CREATED)
+    .json(new ApiResponse("Meal logged", { log, readiness }));
 });
 
 const removeMeal = asyncHandler(async (req, res) => {
@@ -74,7 +89,13 @@ const removeMeal = asyncHandler(async (req, res) => {
 
   const readiness = await calculateReadiness(req.user);
   await User.findByIdAndUpdate(req.user._id, { readiness });
-  await trackEvent({ user: req.user._id, source: "app", type: "hydration_logged", feature: "Nutrition Logging", metadata: { hydrationMl: req.body.hydrationMl } });
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: "hydration_logged",
+    feature: "Nutrition Logging",
+    metadata: { hydrationMl: req.body.hydrationMl },
+  });
   res.json(new ApiResponse("Meal removed", { log, readiness }));
 });
 
@@ -87,7 +108,7 @@ const addHydration = asyncHandler(async (req, res) => {
     calories: 0,
     protein: 0,
     carbs: 0,
-    fats: 0
+    fats: 0,
   });
   recalculateTotals(log);
   await log.save();
@@ -100,12 +121,14 @@ const addHydration = asyncHandler(async (req, res) => {
 
 const generateDailyMealPlan = asyncHandler(async (req, res) => {
   const bounds = getWeekBounds();
+  await ensureMonthlyTokenBudget("meal_generation");
   await AIUsageLog.create({
     user: req.user._id,
     type: "meal_generation",
     weekKey: bounds.weekKey,
     charged: true,
-    requestSummary: "Daily meal plan request"
+    estimatedTokens: estimateTokens("meal_generation"),
+    requestSummary: "Daily meal plan request",
   });
 
   const rules = await getAdminRuleSettings();
@@ -115,7 +138,9 @@ const generateDailyMealPlan = asyncHandler(async (req, res) => {
 });
 
 const listRecipes = asyncHandler(async (req, res) => {
-  const recipes = await Recipe.find({ isActive: true }).sort({ createdAt: -1 }).limit(200);
+  const recipes = await Recipe.find({ isActive: true })
+    .sort({ createdAt: -1 })
+    .limit(200);
   res.json(new ApiResponse("Recipes", recipes));
 });
 
@@ -124,11 +149,25 @@ const mealSwap = asyncHandler(async (req, res) => {
   const current = await Recipe.findById(recipeId);
   const alternative = await Recipe.findOne({
     _id: { $ne: recipeId },
-    calories: { $gte: (current?.calories || 0) - 100, $lte: (current?.calories || 0) + 100 },
-    protein: { $gte: (current?.protein || 0) - 10, $lte: (current?.protein || 0) + 10 }
+    calories: {
+      $gte: (current?.calories || 0) - 100,
+      $lte: (current?.calories || 0) + 100,
+    },
+    protein: {
+      $gte: (current?.protein || 0) - 10,
+      $lte: (current?.protein || 0) + 10,
+    },
   });
 
   res.json(new ApiResponse("Meal swap generated", { current, alternative }));
 });
 
-module.exports = { getTodayLog, addMeal, removeMeal, addHydration, generateDailyMealPlan, listRecipes, mealSwap };
+module.exports = {
+  getTodayLog,
+  addMeal,
+  removeMeal,
+  addHydration,
+  generateDailyMealPlan,
+  listRecipes,
+  mealSwap,
+};

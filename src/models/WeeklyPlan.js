@@ -83,7 +83,7 @@ const weeklyPlanSchema = new mongoose.Schema(
     adminReview: {
       status: {
         type: String,
-        enum: ["pending", "approved", "regenerated"],
+        enum: ["pending", "approved", "regenerated", "rejected"],
         default: "pending"
       },
       reviewedBy: {

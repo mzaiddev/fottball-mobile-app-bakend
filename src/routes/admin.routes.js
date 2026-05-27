@@ -40,6 +40,7 @@ router.post("/team", requirePermission("roles"), validateBody({
 router.get("/plans/review-queue", requirePermission("plans"), controller.getPlanReviewQueue);
 router.post("/plans/:id/approve", requirePermission("plans"), validateBody({ notes: text(false, 500) }), controller.approvePlan);
 router.post("/plans/:id/regenerate", requirePermission("plans"), validateBody({ notes: text(false, 500) }), controller.regeneratePlanReview);
+router.post("/plans/:id/reject", requirePermission("plans"), validateBody({ notes: text(false, 500) }), controller.rejectPlan);
 router.get("/rules", requirePermission("rules"), controller.listRules);
 router.post("/rules", requirePermission("rules"), validateBody({
   category: { type: "string", required: true, enum: ["training", "nutrition", "matchday", "rehab", "community", "general"] },

@@ -5,36 +5,40 @@ const aiUsageLogSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
     },
     type: {
       type: String,
       enum: ["plan_generation", "meal_generation", "chat", "system_adjustment"],
-      required: true
+      required: true,
     },
     weekKey: String,
     count: {
       type: Number,
-      default: 1
+      default: 1,
     },
     limit: {
       type: Number,
-      default: 2
+      default: 2,
+    },
+    estimatedTokens: {
+      type: Number,
+      default: 0,
     },
     charged: {
       type: Boolean,
-      default: true
+      default: true,
     },
     status: {
       type: String,
       enum: ["success", "fallback", "error"],
-      default: "success"
+      default: "success",
     },
     requestSummary: String,
     responseSummary: String,
-    errorMessage: String
+    errorMessage: String,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("AIUsageLog", aiUsageLogSchema);
