@@ -338,6 +338,17 @@ const openApiSpec = {
         },
       },
     },
+    "/users/wearables/sync": {
+      post: {
+        tags: ["Users"],
+        summary: "Refresh wearable sync state and readiness",
+        security: bearerSecurity,
+        responses: {
+          200: apiResponse("Wearable sync complete"),
+          ...errorResponses,
+        },
+      },
+    },
     "/users/referrals": {
       get: {
         tags: ["Users"],

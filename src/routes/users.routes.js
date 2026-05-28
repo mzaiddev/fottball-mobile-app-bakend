@@ -25,6 +25,7 @@ router.post("/wearables", validateBody({
   provider: { type: "string", required: true, enum: ["appleHealth", "googleFit", "samsungHealth", "garmin", "whoop"] },
   connected: { type: "boolean", required: true }
 }), controller.connectWearable);
+router.post("/wearables/sync", controller.syncWearables);
 router.post("/push-token", validateBody({
   token: { type: "string", required: true, max: 300 },
   provider: { type: "string", enum: ["expo", "fcm", "apns"] },

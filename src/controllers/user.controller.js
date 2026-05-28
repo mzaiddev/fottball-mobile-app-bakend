@@ -114,8 +114,62 @@ const connectWearable = asyncHandler(async (req, res) => {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Unsupported wearable provider");
   }
   const path = `wearableConnections.${provider}`;
-  const user = await User.findByIdAndUpdate(req.user._id, { $set: { [path]: Boolean(connected) } }, { new: true });
+  const updates = { [path]: Boolean(connected) };
+  if (connected) {
+    updates.wearableLastSyncedAt = new Date();
+  }
+
+  const user = await User.findByIdAndUpdate(req.user._id, { $set: updates }, { new: true });
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: connected ? "wearable_connected" : "wearable_disconnected",
+    feature: "Wearables",
+    metadata: { provider }
+  });
+
   res.json(new ApiResponse("Wearable connection updated", user.wearableConnections));
+});
+
+const syncWearables = asyncHandler(async (req, res) => {
+  const connections = req.user.wearableConnections || {};
+  const hasConnection = ["appleHealth", "googleFit", "samsungHealth", "garmin", "whoop"].some(
+    (provider) => Boolean(connections[provider])
+  );
+
+  if (!hasConnection) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Connect a wearable before syncing");
+  }
+
+  const readiness = await calculateReadiness(req.user);
+  const wearableLastSyncedAt = new Date();
+  const user = await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      $set: {
+        readiness,
+        wearableLastSyncedAt,
+        lastActiveAt: wearableLastSyncedAt
+      }
+    },
+    { new: true }
+  );
+
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: "wearable_synced",
+    feature: "Wearables",
+    metadata: { providers: Object.keys(connections).filter((provider) => connections[provider]) }
+  });
+
+  res.json(
+    new ApiResponse("Wearable sync complete", {
+      wearableConnections: user.wearableConnections,
+      readiness: user.readiness,
+      syncedAt: wearableLastSyncedAt.toISOString()
+    })
+  );
 });
 
 const getDashboard = asyncHandler(async (req, res) => {
@@ -237,6 +291,7 @@ module.exports = {
   updateOnboarding,
   updateProfile,
   connectWearable,
+  syncWearables,
   getDashboard,
   listNotifications,
   getNotificationUnreadCount,

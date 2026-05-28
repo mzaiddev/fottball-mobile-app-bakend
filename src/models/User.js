@@ -90,6 +90,7 @@ const userSchema = new mongoose.Schema(
       garmin: { type: Boolean, default: false },
       whoop: { type: Boolean, default: false }
     },
+    wearableLastSyncedAt: Date,
     goals: {
       type: [String],
       default: []
