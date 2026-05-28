@@ -145,7 +145,7 @@ async function generateWeeklyPlan(user, constraints) {
   const normalizedConstraints = normalizePlanConstraints(constraints, rules);
   const fallback = await buildFallbackPlan(user, normalizedConstraints);
 
-  return generateStructuredJson({
+  const result = await generateStructuredJson({
     system:
       "You generate safe weekly football performance plans. Respect match days, training days, gym availability, injuries, max session duration, recovery minimums, and admin approval settings. Return JSON only.",
     prompt: `Create a weekly plan for this football athlete: ${JSON.stringify({
@@ -155,8 +155,19 @@ async function generateWeeklyPlan(user, constraints) {
       constraints: normalizedConstraints,
       adminRules: rules
     })}. Use this JSON shape: ${JSON.stringify(fallback)}.`,
-    fallback
+    fallback,
+    includeMeta: true
   });
+
+  return {
+    ...result.data,
+    aiMeta: {
+      source: result.source,
+      model: result.model,
+      usage: result.usage,
+      errorMessage: result.errorMessage
+    }
+  };
 }
 
 function normalizePlanConstraints(constraints = {}, rules = {}) {

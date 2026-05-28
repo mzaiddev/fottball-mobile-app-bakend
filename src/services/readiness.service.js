@@ -31,14 +31,16 @@ async function calculateReadiness(user) {
   const daysSinceLastMatch = lastMatch ? dayjs(now).diff(lastMatch.dateTime, "day") : 5;
   const matchTimingScore = clamp(85 - Math.abs(3 - daysUntilMatch) * 8 + Math.min(daysSinceLastMatch, 5) * 2);
 
-  const caloriesPct = nutrition?.dailyTargets?.calories
-    ? (nutrition.totals.calories / nutrition.dailyTargets.calories) * 100
+  const totals = nutrition?.totals || {};
+  const targets = nutrition?.dailyTargets || {};
+  const caloriesPct = targets.calories
+    ? (Number(totals.calories || 0) / targets.calories) * 100
     : 70;
-  const proteinPct = nutrition?.dailyTargets?.protein
-    ? (nutrition.totals.protein / nutrition.dailyTargets.protein) * 100
+  const proteinPct = targets.protein
+    ? (Number(totals.protein || 0) / targets.protein) * 100
     : 70;
-  const hydrationPct = nutrition?.dailyTargets?.hydrationMl
-    ? (nutrition.totals.hydrationMl / nutrition.dailyTargets.hydrationMl) * 100
+  const hydrationPct = targets.hydrationMl
+    ? (Number(totals.hydrationMl || 0) / targets.hydrationMl) * 100
     : 70;
   const nutritionScore = clamp((caloriesPct + proteinPct + hydrationPct) / 3);
 

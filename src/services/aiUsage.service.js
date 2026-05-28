@@ -4,15 +4,8 @@ const AIUsageLog = require("../models/AIUsageLog");
 const ApiError = require("../utils/ApiError");
 const { getAdminRuleSettings } = require("./adminRules.service");
 
-const ESTIMATED_TOKENS = {
-  plan_generation: 1200,
-  meal_generation: 900,
-  chat: 700,
-  system_adjustment: 800,
-};
-
-function estimateTokens(type, fallback = 1200) {
-  return ESTIMATED_TOKENS[type] || fallback;
+function getUsageTokenTotal(usage) {
+  return Number(usage?.total_tokens || usage?.totalTokens || 0);
 }
 
 async function getMonthlyTokenUsage() {
@@ -29,15 +22,7 @@ async function getMonthlyTokenUsage() {
         _id: null,
         estimatedTokens: {
           $sum: {
-            $ifNull: [
-              "$estimatedTokens",
-              {
-                $multiply: [
-                  { $ifNull: ["$count", 1] },
-                  ESTIMATED_TOKENS.plan_generation,
-                ],
-              },
-            ],
+            $ifNull: ["$estimatedTokens", 0],
           },
         },
       },
@@ -48,9 +33,11 @@ async function getMonthlyTokenUsage() {
 }
 
 async function getMonthlyTokenBudget() {
-  const rules = await getAdminRuleSettings();
+  const [rules, usedTokens] = await Promise.all([
+    getAdminRuleSettings(),
+    getMonthlyTokenUsage(),
+  ]);
   const tokenCap = Number(rules.tokenCap || 0);
-  const usedTokens = await getMonthlyTokenUsage();
 
   return {
     tokenCap,
@@ -59,13 +46,12 @@ async function getMonthlyTokenBudget() {
   };
 }
 
-async function ensureMonthlyTokenBudget(type) {
-  const requestedTokens = estimateTokens(type);
+async function ensureMonthlyTokenBudget() {
   const budget = await getMonthlyTokenBudget();
 
   if (
     budget.tokenCap > 0 &&
-    budget.usedTokens + requestedTokens > budget.tokenCap
+    budget.usedTokens >= budget.tokenCap
   ) {
     throw new ApiError(
       StatusCodes.TOO_MANY_REQUESTS,
@@ -74,21 +60,16 @@ async function ensureMonthlyTokenBudget(type) {
         tokenCap: budget.tokenCap,
         usedTokens: budget.usedTokens,
         remainingTokens: budget.remainingTokens,
-        requestedTokens,
       },
     );
   }
 
-  return {
-    ...budget,
-    requestedTokens,
-  };
+  return budget;
 }
 
 module.exports = {
-  ESTIMATED_TOKENS,
   ensureMonthlyTokenBudget,
-  estimateTokens,
+  getUsageTokenTotal,
   getMonthlyTokenBudget,
   getMonthlyTokenUsage,
 };

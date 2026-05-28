@@ -1,5 +1,6 @@
 const AdminRule = require("../models/AdminRule");
 const RehabProtocol = require("../models/RehabProtocol");
+const Recipe = require("../models/Recipe");
 const User = require("../models/User");
 const env = require("../config/env");
 const defaults = require("../data/defaultSeed");
@@ -13,6 +14,11 @@ async function bootstrapDefaults() {
   const rehabCount = await RehabProtocol.countDocuments();
   if (!rehabCount) {
     await RehabProtocol.insertMany(defaults.rehabProtocols);
+  }
+
+  const recipeCount = await Recipe.countDocuments();
+  if (!recipeCount) {
+    await Recipe.insertMany(defaults.recipes);
   }
 
   if (env.defaultAdmin.email && env.defaultAdmin.password) {

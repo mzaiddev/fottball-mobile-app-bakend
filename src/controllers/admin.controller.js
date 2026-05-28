@@ -291,12 +291,7 @@ const listAiLogs = asyncHandler(async (req, res) => {
           totalCalls: { $sum: { $ifNull: ["$count", 1] } },
           estimatedTokens: {
             $sum: {
-              $ifNull: [
-                "$estimatedTokens",
-                {
-                  $multiply: [{ $ifNull: ["$count", 1] }, 1200],
-                },
-              ],
+              $ifNull: ["$estimatedTokens", 0],
             },
           },
           capHits: {
@@ -310,11 +305,12 @@ const listAiLogs = asyncHandler(async (req, res) => {
     getMonthlyTokenBudget(),
   ]);
   const stats = monthStats[0] || {};
+  const usedTokens = Number(stats.estimatedTokens || budget.usedTokens || 0);
   const summary = {
     totalCalls: Number(stats.totalCalls || 0),
-    estimatedTokens: Number(stats.estimatedTokens || budget.usedTokens || 0),
+    estimatedTokens: usedTokens,
     estimatedCost: Number(
-      ((Number(stats.estimatedTokens || 0) / 1200) * 0.03).toFixed(2),
+      ((usedTokens / 1200) * 0.03).toFixed(2),
     ),
     capHits: Number(stats.capHits || 0),
     tokenCap: budget.tokenCap,

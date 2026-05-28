@@ -1,5 +1,6 @@
 const dayjs = require("dayjs");
 const { StatusCodes } = require("http-status-codes");
+const mongoose = require("mongoose");
 const AIUsageLog = require("../models/AIUsageLog");
 const NutritionLog = require("../models/NutritionLog");
 const Recipe = require("../models/Recipe");
@@ -16,21 +17,33 @@ const {
 const { getAdminRuleSettings } = require("../services/adminRules.service");
 const {
   ensureMonthlyTokenBudget,
-  estimateTokens,
+  getUsageTokenTotal,
 } = require("../services/aiUsage.service");
 const { trackEvent } = require("../services/analytics.service");
 
+const MEAL_TYPES = new Set(["breakfast", "lunch", "snack", "dinner"]);
+
+function targetsDiffer(current = {}, next = {}) {
+  return ["calories", "protein", "carbs", "fats", "hydrationMl"].some(
+    (key) => Number(current[key] || 0) !== Number(next[key] || 0),
+  );
+}
+
 async function getOrCreateTodayLog(user) {
   const date = dayjs().startOf("day").toDate();
+  const rules = await getAdminRuleSettings();
+  const dailyTargets = calculateTargets(user, rules);
   let log = await NutritionLog.findOne({ user: user._id, date });
   if (!log) {
-    const rules = await getAdminRuleSettings();
     log = await NutritionLog.create({
       user: user._id,
       date,
-      dailyTargets: calculateTargets(user, rules),
+      dailyTargets,
       meals: [],
     });
+  } else if (targetsDiffer(log.dailyTargets, dailyTargets)) {
+    log.dailyTargets = dailyTargets;
+    await log.save();
   }
   return log;
 }
@@ -50,6 +63,42 @@ function recalculateTotals(log) {
   log.totals = totals;
 }
 
+async function updateReadiness(user) {
+  const readiness = await calculateReadiness(user);
+  await User.findByIdAndUpdate(user._id, { readiness });
+  return readiness;
+}
+
+async function buildMealPayload(body) {
+  const mealType = String(body.mealType || "").toLowerCase();
+  if (!MEAL_TYPES.has(mealType)) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "mealType is invalid");
+  }
+
+  let recipe = null;
+  if (body.recipeId) {
+    if (!mongoose.Types.ObjectId.isValid(body.recipeId)) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, "recipeId is invalid");
+    }
+    recipe = await Recipe.findOne({ _id: body.recipeId, isActive: true }).lean();
+    if (!recipe) {
+      throw new ApiError(StatusCodes.NOT_FOUND, "Recipe not found");
+    }
+  }
+
+  return {
+    name: body.name || recipe?.name,
+    mealType,
+    calories: Number(body.calories ?? recipe?.calories ?? 0),
+    protein: Number(body.protein ?? recipe?.protein ?? 0),
+    carbs: Number(body.carbs ?? recipe?.carbs ?? 0),
+    fats: Number(body.fats ?? recipe?.fats ?? 0),
+    hydrationMl: Number(body.hydrationMl || recipe?.hydrationMl || 0),
+    barcode: body.barcode,
+    recipe: recipe?._id,
+  };
+}
+
 const getTodayLog = asyncHandler(async (req, res) => {
   const log = await getOrCreateTodayLog(req.user);
   res.json(new ApiResponse("Nutrition log", log));
@@ -57,18 +106,18 @@ const getTodayLog = asyncHandler(async (req, res) => {
 
 const addMeal = asyncHandler(async (req, res) => {
   const log = await getOrCreateTodayLog(req.user);
-  log.meals.push(req.body);
+  const meal = await buildMealPayload(req.body);
+  log.meals.push(meal);
   recalculateTotals(log);
   await log.save();
 
-  const readiness = await calculateReadiness(req.user);
-  await User.findByIdAndUpdate(req.user._id, { readiness });
+  const readiness = await updateReadiness(req.user);
   await trackEvent({
     user: req.user._id,
     source: "app",
     type: "meal_logged",
     feature: "Nutrition Logging",
-    metadata: { mealType: req.body.mealType },
+    metadata: { mealType: meal.mealType, recipeId: meal.recipe },
   });
 
   res
@@ -83,18 +132,17 @@ const removeMeal = asyncHandler(async (req, res) => {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Meal item not found");
   }
 
-  log.meals.splice(index, 1);
+  const [removed] = log.meals.splice(index, 1);
   recalculateTotals(log);
   await log.save();
 
-  const readiness = await calculateReadiness(req.user);
-  await User.findByIdAndUpdate(req.user._id, { readiness });
+  const readiness = await updateReadiness(req.user);
   await trackEvent({
     user: req.user._id,
     source: "app",
-    type: "hydration_logged",
+    type: "meal_removed",
     feature: "Nutrition Logging",
-    metadata: { hydrationMl: req.body.hydrationMl },
+    metadata: { mealType: removed?.mealType, calories: removed?.calories || 0 },
   });
   res.json(new ApiResponse("Meal removed", { log, readiness }));
 });
@@ -113,27 +161,63 @@ const addHydration = asyncHandler(async (req, res) => {
   recalculateTotals(log);
   await log.save();
 
-  const readiness = await calculateReadiness(req.user);
-  await User.findByIdAndUpdate(req.user._id, { readiness });
+  const readiness = await updateReadiness(req.user);
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: "hydration_logged",
+    feature: "Nutrition Logging",
+    metadata: { hydrationMl: Number(req.body.hydrationMl || 0) },
+  });
 
   res.json(new ApiResponse("Hydration added", { log, readiness }));
 });
 
+const removeHydration = asyncHandler(async (req, res) => {
+  const log = await getOrCreateTodayLog(req.user);
+  const index = [...log.meals]
+    .map((meal, mealIndex) => ({ meal, mealIndex }))
+    .reverse()
+    .find((item) => item.meal.mealType === "hydration")?.mealIndex;
+
+  if (index === undefined) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Hydration entry not found");
+  }
+
+  const [removed] = log.meals.splice(index, 1);
+  recalculateTotals(log);
+  await log.save();
+
+  const readiness = await updateReadiness(req.user);
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: "hydration_removed",
+    feature: "Nutrition Logging",
+    metadata: { hydrationMl: removed?.hydrationMl || 0 },
+  });
+
+  res.json(new ApiResponse("Hydration removed", { log, readiness }));
+});
+
 const generateDailyMealPlan = asyncHandler(async (req, res) => {
   const bounds = getWeekBounds();
-  await ensureMonthlyTokenBudget("meal_generation");
+  await ensureMonthlyTokenBudget();
+
+  const rules = await getAdminRuleSettings();
+  const targets = calculateTargets(req.user, rules);
+  const { plan, aiMeta } = await generateMealPlan(req.user, targets);
   await AIUsageLog.create({
     user: req.user._id,
     type: "meal_generation",
     weekKey: bounds.weekKey,
     charged: true,
-    estimatedTokens: estimateTokens("meal_generation"),
+    estimatedTokens: getUsageTokenTotal(aiMeta?.usage),
+    status: aiMeta?.source === "openai" ? "success" : "fallback",
     requestSummary: "Daily meal plan request",
+    errorMessage: aiMeta?.errorMessage,
   });
 
-  const rules = await getAdminRuleSettings();
-  const targets = calculateTargets(req.user, rules);
-  const plan = await generateMealPlan(req.user, targets);
   res.json(new ApiResponse("Meal plan generated", { targets, plan }));
 });
 
@@ -146,9 +230,16 @@ const listRecipes = asyncHandler(async (req, res) => {
 
 const mealSwap = asyncHandler(async (req, res) => {
   const { recipeId } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(recipeId)) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "recipeId is invalid");
+  }
   const current = await Recipe.findById(recipeId);
+  if (!current || current.isActive === false) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Recipe not found");
+  }
   const alternative = await Recipe.findOne({
     _id: { $ne: recipeId },
+    isActive: true,
     calories: {
       $gte: (current?.calories || 0) - 100,
       $lte: (current?.calories || 0) + 100,
@@ -167,6 +258,7 @@ module.exports = {
   addMeal,
   removeMeal,
   addHydration,
+  removeHydration,
   generateDailyMealPlan,
   listRecipes,
   mealSwap,

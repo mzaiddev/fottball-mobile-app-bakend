@@ -155,6 +155,7 @@ async function generateStructuredJson({
   fallback,
   temperature = 0.2,
   maxTokens = 1800,
+  includeMeta = false,
 }) {
   const result = await createChatCompletion({
     system,
@@ -166,11 +167,26 @@ async function generateStructuredJson({
     purpose: "structured_json",
   });
 
+  const data =
+    result.source === "openai"
+      ? parseJsonOrFallback(result.content, fallback)
+      : fallback;
+
+  if (includeMeta) {
+    return {
+      data,
+      source: result.source,
+      model: result.model,
+      usage: result.usage,
+      errorMessage: result.errorMessage,
+    };
+  }
+
   if (result.source !== "openai") {
     return fallback;
   }
 
-  return parseJsonOrFallback(result.content, fallback);
+  return data;
 }
 
 module.exports = {

@@ -59,15 +59,26 @@ async function generateMealPlan(user, targets) {
     targets
   };
 
-  return generateStructuredJson({
+  const result = await generateStructuredJson({
     system: "You create practical meal plans for footballers. Keep meals simple and aligned to macros.",
     prompt: `Create a one-day meal plan for a football athlete. User profile: ${JSON.stringify(
       user.onboarding?.answers || {}
     )}. Nutrition targets: ${JSON.stringify(targets)}. Available recipes: ${JSON.stringify(
       recipes.map((r) => ({ name: r.name, calories: r.calories, protein: r.protein }))
     )}.`,
-    fallback
+    fallback,
+    includeMeta: true
   });
+
+  return {
+    plan: result.data,
+    aiMeta: {
+      source: result.source,
+      model: result.model,
+      usage: result.usage,
+      errorMessage: result.errorMessage
+    }
+  };
 }
 
 module.exports = { calculateTargets, generateMealPlan };

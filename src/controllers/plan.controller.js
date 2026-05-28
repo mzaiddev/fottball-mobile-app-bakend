@@ -16,7 +16,7 @@ const { notifyUser } = require("../services/notification.service");
 const { getAdminRuleSettings } = require("../services/adminRules.service");
 const {
   ensureMonthlyTokenBudget,
-  estimateTokens,
+  getUsageTokenTotal,
 } = require("../services/aiUsage.service");
 const { hasActiveEntitlement } = require("../services/billing.service");
 const { trackEvent } = require("../services/analytics.service");
@@ -68,7 +68,7 @@ const generatePlan = asyncHandler(async (req, res) => {
     );
   }
   await checkPlanAllowance(req.user._id, bounds.weekKey);
-  await ensureMonthlyTokenBudget("plan_generation");
+  await ensureMonthlyTokenBudget();
   const requestedGymDays = gymDays ?? req.user.onboarding?.answers?.gymDays;
 
   const constraints = {
@@ -115,6 +115,10 @@ const generatePlan = asyncHandler(async (req, res) => {
       },
       aiMeta: {
         generatedAt: new Date(),
+        source: generated.aiMeta?.source,
+        model: generated.aiMeta?.model,
+        usage: generated.aiMeta?.usage,
+        errorMessage: generated.aiMeta?.errorMessage,
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true },
@@ -126,9 +130,11 @@ const generatePlan = asyncHandler(async (req, res) => {
     weekKey: bounds.weekKey,
     charged: true,
     limit: Number(rules.regens || 2),
-    estimatedTokens: estimateTokens("plan_generation"),
+    estimatedTokens: getUsageTokenTotal(generated.aiMeta?.usage),
+    status: generated.aiMeta?.source === "openai" ? "success" : "fallback",
     requestSummary: "Weekly plan generation",
     responseSummary: `Generated ${plan.sessions.length} sessions`,
+    errorMessage: generated.aiMeta?.errorMessage,
   });
 
   await trackEvent({
@@ -320,7 +326,7 @@ const getCurrentPlan = asyncHandler(async (req, res) => {
     return res.json(
       new ApiResponse(
         "Current weekly plan",
-        pendingPlan ? { ...pendingPlan, playerVisibility: "pending" } : null,
+        pendingPlan ? { ...pendingPlan, playerVisibility: "live" } : null,
       ),
     );
   }
@@ -547,18 +553,9 @@ const aiCoachChat = asyncHandler(async (req, res) => {
   if (!message) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Message is required");
   }
-  await ensureMonthlyTokenBudget("chat");
+  await ensureMonthlyTokenBudget();
 
   const bounds = getWeekBounds();
-  const usageLog = await AIUsageLog.create({
-    user: req.user._id,
-    type: "chat",
-    weekKey: bounds.weekKey,
-    charged: true,
-    estimatedTokens: estimateTokens("chat"),
-    requestSummary: message.slice(0, 120),
-  });
-
   const today = dayjs().startOf("day").toDate();
   const [plan, readiness, recentWorkouts, nutritionLog, upcomingMatch] =
     await Promise.all([
@@ -614,10 +611,17 @@ const aiCoachChat = asyncHandler(async (req, res) => {
     fallback,
   });
 
-  usageLog.status = aiResult.source === "openai" ? "success" : "fallback";
-  usageLog.responseSummary = aiResult.content.slice(0, 240);
-  usageLog.errorMessage = aiResult.errorMessage;
-  await usageLog.save();
+  await AIUsageLog.create({
+    user: req.user._id,
+    type: "chat",
+    weekKey: bounds.weekKey,
+    charged: true,
+    estimatedTokens: getUsageTokenTotal(aiResult.usage),
+    status: aiResult.source === "openai" ? "success" : "fallback",
+    requestSummary: message.slice(0, 120),
+    responseSummary: aiResult.content.slice(0, 240),
+    errorMessage: aiResult.errorMessage,
+  });
   await trackEvent({
     user: req.user._id,
     source: "app",

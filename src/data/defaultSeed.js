@@ -51,5 +51,59 @@ module.exports = {
         { name: "Supported calf raise", sets: 3, reps: "12", notes: "Pain-free range" }
       ]
     }
+  ],
+  recipes: [
+    {
+      name: "Greek yogurt oats bowl",
+      description: "High-protein breakfast with slow carbs for training days.",
+      ingredients: ["Greek yogurt", "rolled oats", "banana", "honey", "berries"],
+      steps: ["Mix yogurt and oats", "Top with banana, berries, and honey"],
+      calories: 520,
+      protein: 34,
+      carbs: 72,
+      fats: 10,
+      dietaryTags: ["breakfast", "high-protein", "training-day"],
+      allergens: ["dairy"],
+      sourceType: "database"
+    },
+    {
+      name: "Chicken rice performance bowl",
+      description: "Balanced lunch for match prep or post-training refuel.",
+      ingredients: ["chicken breast", "rice", "olive oil", "mixed vegetables", "lemon"],
+      steps: ["Grill chicken", "Serve over rice with vegetables and lemon"],
+      calories: 680,
+      protein: 48,
+      carbs: 78,
+      fats: 18,
+      dietaryTags: ["lunch", "high-protein", "match-prep"],
+      allergens: [],
+      sourceType: "database"
+    },
+    {
+      name: "Salmon potatoes recovery plate",
+      description: "Recovery dinner with protein, omega fats, and steady carbs.",
+      ingredients: ["salmon", "potatoes", "spinach", "olive oil", "yogurt sauce"],
+      steps: ["Bake salmon", "Roast potatoes", "Serve with spinach and sauce"],
+      calories: 720,
+      protein: 44,
+      carbs: 62,
+      fats: 30,
+      dietaryTags: ["dinner", "recovery", "omega-3"],
+      allergens: ["fish", "dairy"],
+      sourceType: "database"
+    },
+    {
+      name: "Fruit whey shake",
+      description: "Fast snack for topping up protein and carbs.",
+      ingredients: ["whey protein", "milk", "banana", "berries"],
+      steps: ["Blend all ingredients until smooth"],
+      calories: 360,
+      protein: 32,
+      carbs: 46,
+      fats: 6,
+      dietaryTags: ["snack", "quick", "high-protein"],
+      allergens: ["dairy"],
+      sourceType: "database"
+    }
   ]
 };
