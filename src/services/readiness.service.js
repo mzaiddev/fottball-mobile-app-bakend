@@ -3,6 +3,7 @@ const Match = require("../models/Match");
 const NutritionLog = require("../models/NutritionLog");
 const ProgressEntry = require("../models/ProgressEntry");
 const WorkoutLog = require("../models/WorkoutLog");
+const { getWearableSummary } = require("./wearable.service");
 
 function clamp(value) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -11,19 +12,33 @@ function clamp(value) {
 async function calculateReadiness(user) {
   const now = new Date();
   const weekAgo = dayjs(now).subtract(7, "day").toDate();
-  const [workouts, lastSleep, matches, nutrition] = await Promise.all([
+  const [workouts, lastSleep, matches, nutrition, wearableSummary] = await Promise.all([
     WorkoutLog.find({ user: user._id, performedAt: { $gte: weekAgo } }).lean(),
     ProgressEntry.findOne({ user: user._id, type: { $in: ["sleep", "recovery"] } }).sort({ recordedAt: -1 }).lean(),
     Match.find({ user: user._id }).sort({ dateTime: -1 }).limit(10).lean(),
-    NutritionLog.findOne({ user: user._id }).sort({ date: -1 }).lean()
+    NutritionLog.findOne({ user: user._id }).sort({ date: -1 }).lean(),
+    getWearableSummary(user._id, 7)
   ]);
 
-  const trainingLoadSum = workouts.reduce((sum, item) => sum + (item.trainingLoad || (item.durationMin || 0) * (item.rpe || 5)), 0);
+  const wearableLoad =
+    (wearableSummary.active_energy_kcal?.total || 0) * 0.08 +
+    (wearableSummary.steps?.total || 0) * 0.003;
+  const trainingLoadSum =
+    workouts.reduce((sum, item) => sum + (item.trainingLoad || (item.durationMin || 0) * (item.rpe || 5)), 0) +
+    Math.min(300, wearableLoad);
   const trainingLoadScore = clamp(100 - Math.abs(350 - trainingLoadSum) / 3);
 
-  const recoveryValue = typeof lastSleep?.value === "number" ? lastSleep.value : 7;
+  const wearableSleepHours = wearableSummary.sleep_minutes?.average
+    ? wearableSummary.sleep_minutes.average / 60
+    : null;
+  const recoveryValue = typeof lastSleep?.value === "number" ? lastSleep.value : wearableSleepHours || 7;
   const soreness = typeof lastSleep?.metadata?.soreness === "number" ? lastSleep.metadata.soreness : 3;
-  const recoveryScore = clamp(recoveryValue * 10 - soreness * 5 + 35);
+  const restingHeartRate = wearableSummary.resting_heart_rate_bpm?.average;
+  const hrv = wearableSummary.hrv_rmssd_ms?.average;
+  const heartRateAdjustment =
+    restingHeartRate && restingHeartRate > 72 ? -6 : restingHeartRate && restingHeartRate < 55 ? 4 : 0;
+  const hrvAdjustment = hrv && hrv > 65 ? 4 : hrv && hrv < 30 ? -5 : 0;
+  const recoveryScore = clamp(recoveryValue * 10 - soreness * 5 + 35 + heartRateAdjustment + hrvAdjustment);
 
   const nextMatch = matches.find((item) => new Date(item.dateTime) > now);
   const lastMatch = matches.find((item) => new Date(item.dateTime) <= now);

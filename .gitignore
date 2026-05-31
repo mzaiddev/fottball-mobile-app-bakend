@@ -1,5 +1,4 @@
 node_modules/
-.env
 
 logs/
 *.log
@@ -20,6 +19,5 @@ uploads/
 .DS_Store
 Thumbs.db
 
-.vscode/
 .idea/
 config.bat

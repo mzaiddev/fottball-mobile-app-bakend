@@ -17,6 +17,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const { calculateReadiness } = require("../services/readiness.service");
 const { hasActiveEntitlement } = require("../services/billing.service");
 const { trackEvent } = require("../services/analytics.service");
+const wearableService = require("../services/wearable.service");
 const { normalizeDayLabel } = require("../utils/weekdays");
 
 const onboardingResponses = {
@@ -109,14 +110,18 @@ const updateProfile = asyncHandler(async (req, res) => {
 
 const connectWearable = asyncHandler(async (req, res) => {
   const { provider, connected } = req.body;
-  const allowedProviders = ["appleHealth", "googleFit", "samsungHealth", "garmin", "whoop"];
-  if (!allowedProviders.includes(provider)) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, "Unsupported wearable provider");
-  }
+  wearableService.assertProvider(provider);
   const path = `wearableConnections.${provider}`;
-  const updates = { [path]: Boolean(connected) };
+  const metaPath = `wearableConnectionMeta.${provider}`;
+  const updates = {
+    [path]: Boolean(connected),
+    [`${metaPath}.status`]: connected ? "connected" : "disconnected"
+  };
   if (connected) {
     updates.wearableLastSyncedAt = new Date();
+    updates[`${metaPath}.connectedAt`] = new Date();
+  } else {
+    updates[`${metaPath}.disconnectedAt`] = new Date();
   }
 
   const user = await User.findByIdAndUpdate(req.user._id, { $set: updates }, { new: true });
@@ -132,8 +137,26 @@ const connectWearable = asyncHandler(async (req, res) => {
 });
 
 const syncWearables = asyncHandler(async (req, res) => {
-  const connections = req.user.wearableConnections || {};
-  const hasConnection = ["appleHealth", "googleFit", "samsungHealth", "garmin", "whoop"].some(
+  const { provider, metrics, device } = req.body || {};
+  let storedCount = 0;
+  let syncedUser = req.user;
+
+  if (Array.isArray(metrics)) {
+    if (!provider) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, "provider is required when syncing metrics");
+    }
+    const result = await wearableService.storeWearableMetrics({
+      userId: req.user._id,
+      provider,
+      metrics,
+      device
+    });
+    storedCount = result.storedCount;
+    syncedUser = result.user;
+  }
+
+  const connections = syncedUser.wearableConnections || {};
+  const hasConnection = wearableService.HEALTH_PROVIDERS.some(
     (provider) => Boolean(connections[provider])
   );
 
@@ -167,9 +190,31 @@ const syncWearables = asyncHandler(async (req, res) => {
     new ApiResponse("Wearable sync complete", {
       wearableConnections: user.wearableConnections,
       readiness: user.readiness,
-      syncedAt: wearableLastSyncedAt.toISOString()
+      syncedAt: wearableLastSyncedAt.toISOString(),
+      storedCount,
+      metricsWindowDays: 14
     })
   );
+});
+
+const getWearableMetrics = asyncHandler(async (req, res) => {
+  const days = Number(req.query.days || 14);
+  const provider = req.query.provider ? String(req.query.provider) : undefined;
+  const metrics = await wearableService.listMetrics(req.user._id, { provider, days });
+  res.json(new ApiResponse("Wearable metrics", { metrics, days: Math.max(1, days || 14) }));
+});
+
+const disconnectWearable = asyncHandler(async (req, res) => {
+  const provider = req.params.provider;
+  const user = await wearableService.disconnectWearable(req.user._id, provider);
+  await trackEvent({
+    user: req.user._id,
+    source: "app",
+    type: "wearable_disconnected",
+    feature: "Wearables",
+    metadata: { provider }
+  });
+  res.json(new ApiResponse("Wearable disconnected", user.wearableConnections));
 });
 
 const getDashboard = asyncHandler(async (req, res) => {
@@ -292,6 +337,8 @@ module.exports = {
   updateProfile,
   connectWearable,
   syncWearables,
+  getWearableMetrics,
+  disconnectWearable,
   getDashboard,
   listNotifications,
   getNotificationUnreadCount,

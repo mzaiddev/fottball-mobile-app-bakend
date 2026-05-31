@@ -6,8 +6,8 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "dev": "node init && nodemon src/server.js",
+    "start": "node init && node src/server.js",
     "check": "node -e \"const fs=require('fs');const path=require('path');const cp=require('child_process');const walk=(dir)=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(d=>d.isDirectory()?walk(path.join(dir,d.name)):d.name.endsWith('.js')?[path.join(dir,d.name)]:[]);for(const file of walk('src'))cp.execFileSync(process.execPath,['--check',file],{stdio:'inherit'});\"",
     "lint": "npm run check"
   },

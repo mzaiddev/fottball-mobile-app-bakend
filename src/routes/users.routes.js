@@ -25,7 +25,14 @@ router.post("/wearables", validateBody({
   provider: { type: "string", required: true, enum: ["appleHealth", "googleFit", "samsungHealth", "garmin", "whoop"] },
   connected: { type: "boolean", required: true }
 }), controller.connectWearable);
-router.post("/wearables/sync", controller.syncWearables);
+router.post("/wearables/sync", validateBody({
+  provider: { type: "string", enum: ["appleHealth", "googleFit", "samsungHealth", "garmin", "whoop"] },
+  metrics: { type: "array", max: 1000 },
+  device: { type: "object" },
+  clientSyncedAt: { type: "string", max: 80 }
+}), controller.syncWearables);
+router.get("/wearables/metrics", controller.getWearableMetrics);
+router.delete("/wearables/:provider", controller.disconnectWearable);
 router.post("/push-token", validateBody({
   token: { type: "string", required: true, max: 300 },
   provider: { type: "string", enum: ["expo", "fcm", "apns"] },
